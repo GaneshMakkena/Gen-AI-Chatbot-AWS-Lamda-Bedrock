@@ -8,15 +8,20 @@ Globals:
     MemorySize: 1024
 
 Parameters:
+  GoogleApiKey:
+    Type: String
+    NoEcho: true
+    Description: Google AI API Key for Gemini models
+  
   BedrockBearerToken:
     Type: String
     NoEcho: true
-    Description: AWS Bedrock Bearer Token for API authentication
+    Description: AWS Bedrock Bearer Token for Titan image generation
   
-  BedrockLlmModel:
+  GeminiLlmModel:
     Type: String
-    Default: mistral.mistral-small-2402-v1:0
-    Description: Bedrock Model ID for LLM (switched to Small for speed < 30s latency)
+    Default: gemini-2.0-flash
+    Description: Gemini Model ID for LLM (text generation)
   
   Environment:
     Type: String
@@ -35,13 +40,16 @@ Resources:
       CodeUri: ../backend/
       Handler: lambda_handler.handler
       Runtime: python3.11
+      Timeout: 90  # 90 seconds for image generation
+      MemorySize: 1024  # 1GB RAM
       Architectures:
         - arm64  # Cost-effective ARM architecture
       Environment:
         Variables:
+          GOOGLE_API_KEY: !Ref GoogleApiKey
           AWS_BEARER_TOKEN_BEDROCK: !Ref BedrockBearerToken
+          GEMINI_LLM_MODEL: !Ref GeminiLlmModel
           BEDROCK_REGION: !Ref AWS::Region
-          BEDROCK_LLM_MODEL: !Ref BedrockLlmModel
           ENVIRONMENT: !Ref Environment
           IMAGES_BUCKET: !Ref ImagesBucket
       Policies:

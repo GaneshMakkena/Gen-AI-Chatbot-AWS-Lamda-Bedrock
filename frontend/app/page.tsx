@@ -267,12 +267,13 @@ export default function Home() {
               </div>
             </div>
 
-            {/* New Chat Button */}
+            {/* Actions */}
             <div className="flex items-center gap-2">
+              {/* New Chat Button */}
               {messages.length > 0 && (
                 <button
                   onClick={handleNewChat}
-                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/20 hover:bg-white/30 transition-colors mr-2 animate-fade-in"
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/20 hover:bg-white/30 transition-colors animate-fade-in"
                   title="Start New Chat"
                 >
                   <PlusCircle className="w-5 h-5" />

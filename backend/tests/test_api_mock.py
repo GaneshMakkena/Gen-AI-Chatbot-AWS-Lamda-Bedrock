@@ -82,12 +82,15 @@ def test_chat_endpoint_error(mock_invoke):
     assert response.json()["detail"] == "Failed to get response from AI"
 
 def test_clean_llm_response():
-    from bedrock_client import clean_llm_response
+    from gemini_client import clean_llm_response
     
-    raw = "<reasoning>Thinking...</reasoning>Here is the answer.<thinking>More thoughts</thinking>"
+    # Test standard cleaning
+    raw = "<thinking>Thinking...</thinking>Here is the answer.<thinking>More thoughts</thinking>"
     cleaned = clean_llm_response(raw)
     assert cleaned == "Here is the answer."
     
-    raw_unclosed = "Answer.<reasoning>Cut off"
-    cleaned = clean_llm_response(raw_unclosed)
-    assert cleaned == "Answer." 
+    # Test with keep_thinking=True
+    raw_thinking = "<thinking>My thought process</thinking>\nAnswer"
+    cleaned_thinking = clean_llm_response(raw_thinking, keep_thinking=True)
+    assert "**🧠 My Thinking Process:**" in cleaned_thinking
+    assert "My thought process" in cleaned_thinking

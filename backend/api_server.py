@@ -15,8 +15,8 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Import our modules
-from bedrock_client import (
+# Import our modules - Using Gemini instead of Bedrock
+from gemini_client import (
     invoke_llm,
     generate_image,
     generate_all_step_images,
@@ -24,7 +24,8 @@ from bedrock_client import (
     should_generate_images,
     detect_medical_topic,
     upload_image_to_s3,
-    IMAGES_BUCKET
+    IMAGES_BUCKET,
+    LLM_MODEL_ID
 )
 from translation import (
     translate_to_english,
@@ -61,6 +62,7 @@ class ChatRequest(BaseModel):
     language: str = "English"
     generate_images: bool = True
     conversation_history: Optional[List[Dict[str, str]]] = None  # For multi-turn chat
+    thinking_mode: bool = False  # Show AI reasoning process
 
 
 class StepImage(BaseModel):
@@ -106,10 +108,9 @@ class HealthResponse(BaseModel):
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint."""
-    from bedrock_client import LLM_MODEL_ID
     return HealthResponse(
         status="healthy", 
-        version="3.0.0",
+        version="4.0.0-gemini",
         model=LLM_MODEL_ID
     )
 
@@ -154,8 +155,8 @@ async def chat(request: ChatRequest):
         ])
     
     # Get LLM response with in-depth research
-    print(f"Processing query: {english_query[:100]}...")
-    response = invoke_llm(english_query, context=context)
+    print(f"Processing query: {english_query[:100]}... (thinking_mode={request.thinking_mode})")
+    response = invoke_llm(english_query, context=context, thinking_mode=request.thinking_mode)
     
     if not response:
         raise HTTPException(status_code=500, detail="Failed to get response from AI")
@@ -184,11 +185,12 @@ async def chat(request: ChatRequest):
             # Generate a unique hash for this query (for S3 path organization)
             query_hash = hashlib.md5(english_query.encode()).hexdigest()[:12]
             
-            # Limit removed - Mistral Small is fast enough (~5-7s) to allow 
-            # standard parallel image generation for all steps within 30s timeout.
-            # Typical step count is 5-8. Max duration ~15s total.
+            # LIMIT TO 5 IMAGES: API Gateway has a hard 29-second timeout
+            # LLM takes ~20-25s, leaving only ~4-8s for images
+            # Each image takes ~1.5s, so 5 images = ~7.5s
+            steps = steps[:5]
             
-            print(f"Generating images for all {len(steps)} steps")
+            print(f"Generating images for {len(steps)} steps (max 5)")
             
             # Pass query_hash to enable internal parallel S3 upload
             step_images_data = generate_all_step_images(steps, english_query, query_hash=query_hash)

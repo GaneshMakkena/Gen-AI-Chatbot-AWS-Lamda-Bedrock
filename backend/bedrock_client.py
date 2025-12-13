@@ -46,7 +46,7 @@ def get_s3_client():
 
 def upload_image_to_s3(image_base64: str, step_number: str, query_hash: str) -> Optional[str]:
     """
-    Upload a base64 image to S3 and return the public URL.
+    Upload a base64 image to S3 and return a presigned URL.
     
     Args:
         image_base64: Base64 encoded image data
@@ -54,7 +54,7 @@ def upload_image_to_s3(image_base64: str, step_number: str, query_hash: str) -> 
         query_hash: Hash of the query for unique identification
     
     Returns:
-        Public URL of the uploaded image, or None on error
+        Presigned URL (valid for 2 hours) of the uploaded image, or None on error
     """
     if not IMAGES_BUCKET:
         print("IMAGES_BUCKET not configured, returning base64")
@@ -76,10 +76,14 @@ def upload_image_to_s3(image_base64: str, step_number: str, query_hash: str) -> 
             ContentType='image/png'
         )
         
-        # Return the public URL
-        image_url = f"https://{IMAGES_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{image_key}"
-        print(f"Uploaded image to S3: {image_url}")
-        return image_url
+        # Generate presigned URL (valid for 2 hours - aligns with use case)
+        presigned_url = s3.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': IMAGES_BUCKET, 'Key': image_key},
+            ExpiresIn=7200  # 2 hours
+        )
+        print(f"Uploaded image to S3: {presigned_url[:80]}...")
+        return presigned_url
         
     except Exception as e:
         print(f"Error uploading to S3: {e}")

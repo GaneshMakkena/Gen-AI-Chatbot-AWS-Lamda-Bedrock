@@ -41,7 +41,7 @@ Resources:
         Variables:
           AWS_BEARER_TOKEN_BEDROCK: !Ref BedrockBearerToken
           BEDROCK_REGION: !Ref AWS::Region
-          BEDROCK_LLM_MODEL: mistral.mistral-large-3-675b-instruct
+          BEDROCK_LLM_MODEL: !Ref BedrockLlmModel
           ENVIRONMENT: !Ref Environment
           IMAGES_BUCKET: !Ref ImagesBucket
       Policies:
@@ -77,7 +77,7 @@ Resources:
       StageName: !Ref Environment
       CorsConfiguration:
         AllowOrigins:
-          - "*"
+          - "https://d17eixu2k5iihu.cloudfront.net"
         AllowMethods:
           - GET
           - POST

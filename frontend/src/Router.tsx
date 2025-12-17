@@ -1,6 +1,6 @@
-import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { Authenticator } from '@aws-amplify/ui-react';
+import React, { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { Authenticator, useAuthenticator } from '@aws-amplify/ui-react';
 import { Layout } from './components/Layout';
 import { ChatInterface } from './components/ChatInterface';
 import { Profile } from './pages/Profile';
@@ -12,17 +12,28 @@ export function AppRouter() {
         <Authenticator.Provider>
             <BrowserRouter>
                 <Routes>
-                    <Route path="/" element={
-                        <RequireAuth>
-                            <Layout />
-                        </RequireAuth>
-                    }>
+                    {/* Public Routes (wrapped in Layout for consistent UI) */}
+                    <Route path="/" element={<Layout />}>
                         <Route index element={<Navigate to="/chat" replace />} />
                         <Route path="chat" element={<ChatInterface />} />
                         <Route path="chat/:chatId" element={<ChatInterface />} />
-                        <Route path="profile" element={<Profile />} />
-                        <Route path="history" element={<History />} />
-                        <Route path="upload" element={<UploadReport />} />
+
+                        {/* Protected Routes */}
+                        <Route path="profile" element={
+                            <RequireAuth>
+                                <Profile />
+                            </RequireAuth>
+                        } />
+                        <Route path="history" element={
+                            <RequireAuth>
+                                <History />
+                            </RequireAuth>
+                        } />
+                        <Route path="upload" element={
+                            <RequireAuth>
+                                <UploadReport />
+                            </RequireAuth>
+                        } />
                     </Route>
                     <Route path="/login" element={<LoginPage />} />
                 </Routes>
@@ -42,6 +53,15 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 }
 
 function LoginPage() {
+    const { authStatus } = useAuthenticator((context) => [context.authStatus]);
+    const navigate = useNavigate();
+
+    useEffect(() => {
+        if (authStatus === 'authenticated') {
+            navigate('/chat', { replace: true });
+        }
+    }, [authStatus, navigate]);
+
     return (
         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
             <Authenticator />

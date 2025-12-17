@@ -28,7 +28,7 @@
     flex-direction: column;
     height: 100%;
     /* Widen container for better space usage */
-    max-width: 1200px; 
+    max-width: 1200px;
     margin: 0 auto;
     background: var(--bg-primary);
     width: 100%;
@@ -257,7 +257,8 @@
 .steps-list {
     display: flex;
     flex-direction: column;
-    gap: 1.5rem; /* Better spacing between steps */
+    gap: 1.5rem;
+    /* Better spacing between steps */
 }
 
 /* Status Indicator */
@@ -297,7 +298,8 @@
     margin-bottom: 0.75rem;
     display: flex;
     justify-content: flex-start;
-    padding-left: 3.5rem; /* Align with input text start */
+    padding-left: 3.5rem;
+    /* Align with input text start */
 }
 
 .image-toggle {
@@ -328,8 +330,10 @@
 .input-form {
     display: flex;
     gap: 1rem;
-    align-items: center; /* Vertical alignment fix */
-    max-width: 1000px; /* Keep input centered but wider */
+    align-items: center;
+    /* Vertical alignment fix */
+    max-width: 1000px;
+    /* Keep input centered but wider */
     margin: 0 auto;
     position: relative;
     background: var(--bg-secondary);
@@ -368,13 +372,15 @@
 
 .chat-input {
     flex: 1;
-    border: none; /* Removed individual border */
+    border: none;
+    /* Removed individual border */
     background: transparent;
     padding: 0.5rem;
     font-size: 1rem;
     color: var(--text-primary);
     min-height: 24px;
-    outline: none; /* Focus handled by container */
+    outline: none;
+    /* Focus handled by container */
 }
 
 .chat-input::placeholder {
@@ -398,7 +404,7 @@
 
 /* Send Button */
 .send-button,
-button[type="submit"] {
+.chat-input-form button[type="submit"] {
     background: var(--primary-color);
     color: white;
     border: none;
@@ -411,26 +417,29 @@ button[type="submit"] {
     cursor: pointer;
     transition: background 0.2s, transform 0.1s;
     flex-shrink: 0;
-    padding: 0; /* Override padding */
+    padding: 0;
+    /* Override padding */
+    margin-left: 0.5rem;
+    /* Add spacing between input and button */
 }
 
-button[type="submit"]:hover:not(:disabled) {
+.chat-input-form button[type="submit"]:hover:not(:disabled) {
     background: var(--primary-hover);
     transform: scale(1.05);
 }
 
-button[type="submit"]:active:not(:disabled) {
+.chat-input-form button[type="submit"]:active:not(:disabled) {
     transform: scale(0.95);
 }
 
-button[type="submit"]:disabled {
+.chat-input-form button[type="submit"]:disabled {
     background: var(--bg-tertiary);
     color: var(--text-muted);
     cursor: not-allowed;
     transform: none;
 }
 
-button[type="submit"].loading {
+.chat-input-form button[type="submit"].loading {
     cursor: wait;
 }
 
@@ -467,11 +476,104 @@ button[type="submit"].loading {
     }
 
     .input-form {
-        border-radius: 24px; /* More pill-shaped on mobile */
+        border-radius: 24px;
+        /* More pill-shaped on mobile */
     }
-    
+
     .input-options {
         justify-content: center;
         padding-left: 0;
+    }
+}
+
+/* Guest Mode Styles */
+.guest-badge {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    font-weight: 500;
+    padding: 0.25rem 0.75rem;
+    border-radius: 9999px;
+    margin-top: 0.5rem;
+    border: 1px solid var(--border-color);
+}
+
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    backdrop-filter: blur(4px);
+    animation: fadeIn 0.2s ease-out;
+}
+
+.modal-content {
+    background: white;
+    padding: 2rem;
+    border-radius: 16px;
+    max-width: 400px;
+    width: 90%;
+    text-align: center;
+    box-shadow: var(--shadow-lg);
+    animation: scaleIn 0.2s ease-out;
+}
+
+.modal-content h2 {
+    margin: 0 0 1rem;
+    color: var(--text-primary);
+    font-size: 1.5rem;
+}
+
+.modal-content p {
+    color: var(--text-secondary);
+    margin: 0 0 1.5rem;
+    line-height: 1.6;
+}
+
+.modal-actions {
+    display: flex;
+    justify-content: center;
+}
+
+.modal-btn-primary {
+    display: inline-block;
+    background: var(--primary-color);
+    color: white;
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: 600;
+    transition: background 0.2s;
+}
+
+.modal-btn-primary:hover {
+    background: var(--primary-hover);
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes scaleIn {
+    from {
+        transform: scale(0.95);
+        opacity: 0;
+    }
+
+    to {
+        transform: scale(1);
+        opacity: 1;
     }
 }

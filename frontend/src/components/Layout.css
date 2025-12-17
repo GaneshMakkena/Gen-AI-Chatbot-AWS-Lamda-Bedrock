@@ -129,7 +129,23 @@
 
 .sign-out-btn:hover {
     background-color: #fef2f2;
-    color: #dc2626;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* Center content in login button */
+}
+
+/* Specific style for login button when re-using sign-out-btn class */
+.sign-out-btn.login-btn {
+    width: 100%;
+    color: var(--primary-color);
+    background-color: #eff6ff;
+    font-weight: 600;
+}
+
+.sign-out-btn.login-btn:hover {
+    background-color: #dbeafe;
+    color: #1d4ed8;
 }
 
 .main-content {

@@ -18,6 +18,7 @@ A modern, AI-powered medical assistant chatbot with multimodal capabilities, ste
 - 💾 **Persisted History** - Chats are saved to DynamoDB and can be reloaded
 - 🏥 **Health Profile** - Stores conditions, medications, and allergies for personalized context
 - ⚡ **High Performance** - CloudFront caching + Lambda Function URLs for speed
+- 👤 **Guest Mode** - Public access with a 3-message trial limit (no login required)
 - 📱 **Responsive Design** - Mobile-first UI built with React & Vanilla CSS
 
 ---

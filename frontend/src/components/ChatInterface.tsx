@@ -44,6 +44,7 @@ function getLoadingMessage(elapsedSeconds: number): string {
 }
 
 // Status indicator component
+// Status indicator component
 function StatusIndicator({ state, elapsed }: { state: string; elapsed: number }) {
     const getMessage = () => {
         switch (state) {
@@ -73,6 +74,22 @@ function StatusIndicator({ state, elapsed }: { state: string; elapsed: number })
             {state === 'WAITING' && elapsed > 0 && (
                 <span className="status-time">{elapsed}s</span>
             )}
+        </div>
+    );
+}
+
+// Guest Limit Modal Component
+function GuestLimitModal() {
+    return (
+        <div className="modal-overlay">
+            <div className="modal-content">
+                <h2>Trial Limit Reached</h2>
+                <p>You've reached the free message limit for guest users.</p>
+                <p>Please sign in or create an account to continue using MediBot with unlimited access, chat history, and health profiles.</p>
+                <div className="modal-actions">
+                    <a href="/login" className="modal-btn-primary">Sign In / Sign Up</a>
+                </div>
+            </div>
         </div>
     );
 }
@@ -138,14 +155,29 @@ export function ChatInterface() {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
 
-    // Auth
+    // Auth & Guest Logic
     const [authToken, setAuthToken] = useState<string | undefined>(undefined);
+    const [isAuthenticated, setIsAuthenticated] = useState(false);
+    const [guestCount, setGuestCount] = useState(0);
+    const GUEST_LIMIT = 3;
 
     useEffect(() => {
         fetchAuthSession().then(session => {
             const token = session.tokens?.idToken?.toString();
             setAuthToken(token);
-        }).catch(err => console.error("Auth error", err));
+            setIsAuthenticated(!!token);
+
+            // If not authenticated, load guest count
+            if (!token) {
+                const count = parseInt(localStorage.getItem('guest_msg_count') || '0');
+                setGuestCount(count);
+            }
+        }).catch(err => {
+            console.error("Auth error", err);
+            // Default to guest if auth fails
+            const count = parseInt(localStorage.getItem('guest_msg_count') || '0');
+            setGuestCount(count);
+        });
     }, []);
 
     const chatState = useChatState(); // Declare chatState here!
@@ -228,7 +260,21 @@ export function ChatInterface() {
     }, []);
 
     const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (!e.target.files || !e.target.files.length || !authToken) return;
+        if (!e.target.files || !e.target.files.length) return;
+
+        // Guest Check
+        if (!isAuthenticated && guestCount >= GUEST_LIMIT) {
+            return; // Modal will block interaction
+        }
+
+        if (!isAuthenticated && !authToken) {
+            // For guest file upload, we might need to block it entirely OR handle it without auth token (backend support required)
+            // Currently backend /presigned-url requires auth. 
+            // Let's prompt login for files for now as it's a premium feature
+            alert("File upload is available for registered users only. Please sign in.");
+            return;
+        }
+
 
         const file = e.target.files[0];
 
@@ -242,8 +288,18 @@ export function ChatInterface() {
         try {
             setUploading(true);
 
+            // Increment guest count if successful
+            if (!isAuthenticated) {
+                const newCount = guestCount + 1;
+                setGuestCount(newCount);
+                localStorage.setItem('guest_msg_count', newCount.toString());
+            }
 
             // 1. Get Presigned URL
+            // Note: authToken is needed here. If we want guests to upload, we need backend change.
+            // Assuming for now guests CANNOT upload files based on the alert above.
+            if (!authToken) throw new Error("Auth required for upload");
+
             const { upload_url, s3_key } = await getPresignedUrl(authToken, file.name, file.type);
 
             // 2. Upload to S3
@@ -304,12 +360,29 @@ export function ChatInterface() {
         }
     };
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        const query = input.trim();
+    const handleSubmit = async (e: React.FormEvent | string) => {
+        // Handle both event and direct string call (from example queries)
+        if (typeof e !== 'string') {
+            e.preventDefault();
+        }
+
+        // Guest Check
+        if (!isAuthenticated && guestCount >= GUEST_LIMIT) {
+            return;
+        }
+
+        const query = typeof e === 'string' ? e : input.trim();
+
         // Allow submission from IDLE, READY, or DEGRADED states
         const canSubmit = ['IDLE', 'READY', 'DEGRADED'].includes(chatState.state);
         if (!query || !canSubmit) return;
+
+        // Increment guest count
+        if (!isAuthenticated) {
+            const newCount = guestCount + 1;
+            setGuestCount(newCount);
+            localStorage.setItem('guest_msg_count', newCount.toString());
+        }
 
         const userMessage: Message = {
             id: Date.now().toString(),
@@ -333,7 +406,7 @@ export function ChatInterface() {
                 query,
                 generate_images: generateImages,
                 conversation_history: conversationHistory,
-            }, authToken); // Pass auth token
+            }, authToken); // Pass auth token (can be undefined for public/guest if checks passed)
 
             const assistantMessage: Message = {
                 id: (Date.now() + 1).toString(),
@@ -360,6 +433,12 @@ export function ChatInterface() {
         }
     };
 
+    // Helper for example queries
+    const handleExampleClick = (query: string) => {
+        if (!isAuthenticated && guestCount >= GUEST_LIMIT) return;
+        setInput(query);
+    }
+
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -372,15 +451,23 @@ export function ChatInterface() {
     };
 
     const isLoading = chatState.state === 'SUBMITTING' || chatState.state === 'WAITING';
+    const isGuestLocked = !isAuthenticated && guestCount >= GUEST_LIMIT;
 
     return (
         <div className="chat-interface">
+            {isGuestLocked && <GuestLimitModal />}
+
             <div className="chat-header">
                 <h1 className="chat-title">
                     <span className="logo">🏥</span>
                     MediBot
                 </h1>
                 <p className="chat-subtitle">AI-Powered Medical Assistant with Visual Guides</p>
+                {!isAuthenticated && (
+                    <div className="guest-badge">
+                        Guest Mode ({guestCount}/{GUEST_LIMIT})
+                    </div>
+                )}
             </div>
 
             <div className="chat-messages">
@@ -391,9 +478,9 @@ export function ChatInterface() {
                         <div className="example-queries">
                             <p>Try asking:</p>
                             <ul>
-                                <li onClick={() => setInput("How do I perform CPR?")}>"How do I perform CPR?"</li>
-                                <li onClick={() => setInput("How to treat a minor burn?")}>"How to treat a minor burn?"</li>
-                                <li onClick={() => setInput("What are the steps to bandage a wound?")}>"What are the steps to bandage a wound?"</li>
+                                <li onClick={() => handleExampleClick("How do I perform CPR?")}>"How do I perform CPR?"</li>
+                                <li onClick={() => handleExampleClick("How to treat a minor burn?")}>"How to treat a minor burn?"</li>
+                                <li onClick={() => handleExampleClick("What are the steps to bandage a wound?")}>"What are the steps to bandage a wound?"</li>
                             </ul>
                         </div>
                     </div>
@@ -445,12 +532,12 @@ export function ChatInterface() {
                             type="checkbox"
                             checked={generateImages}
                             onChange={(e) => setGenerateImages(e.target.checked)}
-                            disabled={isLoading}
+                            disabled={isLoading || isGuestLocked}
                         />
                         <span>Generate visual guides</span>
                     </label>
                 </div>
-                <form onSubmit={handleSubmit} className="input-form">
+                <div className="input-form">
                     <input
                         type="file"
                         ref={fileInputRef}
@@ -462,8 +549,9 @@ export function ChatInterface() {
                         type="button"
                         className="attach-button"
                         onClick={() => fileInputRef.current?.click()}
-                        disabled={isLoading || uploading}
+                        disabled={isLoading || uploading || isGuestLocked}
                         style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 0.5rem', color: '#6b7280' }}
+                        title={!isAuthenticated ? "Login required" : "Attach file"}
                     >
                         <Plus size={24} />
                     </button>
@@ -472,18 +560,18 @@ export function ChatInterface() {
                         type="text"
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
-                        placeholder="Ask a medical question..."
-                        disabled={isLoading || uploading}
-                        onKeyDown={handleKeyDown} // Added onKeyDown for Enter key submission
+                        placeholder={isGuestLocked ? "Free limit reached. Please login." : "Ask a medical question..."}
+                        disabled={isLoading || uploading || isGuestLocked}
+                        onKeyDown={handleKeyDown}
                     />
                     <button
                         type="submit"
-                        disabled={isLoading || uploading || !input.trim()}
+                        disabled={isLoading || uploading || !input.trim() || isGuestLocked}
                         className={isLoading || uploading ? 'loading' : ''}
                     >
                         {isLoading || uploading ? <Loader2 className="spin" size={20} /> : <Send size={20} />}
                     </button>
-                </form>
+                </div>
                 <p className="disclaimer">
                     ⚠️ MediBot provides general health information only. Always consult a healthcare professional for medical advice.
                 </p>

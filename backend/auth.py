@@ -1,6 +1,8 @@
 """
 Authentication module for MediBot - AWS Cognito integration.
-Provides JWT token verification and user extraction.
+Provides JWT token verification with cryptographic signature validation.
+
+SECURITY: Uses python-jose to verify JWT signatures against Cognito JWKS.
 """
 
 import os
@@ -10,59 +12,90 @@ import urllib.request
 from typing import Optional, Dict, Any
 from functools import lru_cache
 
+# JWT verification library
+from jose import jwt, jwk, JWTError
+from jose.utils import base64url_decode
+
 # Cognito configuration from environment
 COGNITO_USER_POOL_ID = os.getenv("COGNITO_USER_POOL_ID", "")
 COGNITO_CLIENT_ID = os.getenv("COGNITO_CLIENT_ID", "")
-AWS_REGION = os.getenv("BEDROCK_REGION") or os.getenv("AWS_REGION", "us-east-1")
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 
 # JWKS URL for Cognito
 JWKS_URL = f"https://cognito-idp.{AWS_REGION}.amazonaws.com/{COGNITO_USER_POOL_ID}/.well-known/jwks.json"
+COGNITO_ISSUER = f"https://cognito-idp.{AWS_REGION}.amazonaws.com/{COGNITO_USER_POOL_ID}"
+
+# Cache for JWKS keys
+_jwks_cache: Dict = {}
+_jwks_cache_time: float = 0
+JWKS_CACHE_TTL = 3600  # 1 hour
 
 
-@lru_cache(maxsize=1)
 def get_jwks() -> Dict:
-    """Fetch and cache JWKS from Cognito."""
+    """
+    Fetch and cache JWKS from Cognito.
+    Caches for 1 hour to reduce API calls while allowing key rotation.
+    """
+    global _jwks_cache, _jwks_cache_time
+    
+    # Check cache
+    if _jwks_cache and (time.time() - _jwks_cache_time) < JWKS_CACHE_TTL:
+        return _jwks_cache
+    
     try:
         with urllib.request.urlopen(JWKS_URL, timeout=5) as response:
-            return json.loads(response.read().decode())
+            _jwks_cache = json.loads(response.read().decode())
+            _jwks_cache_time = time.time()
+            return _jwks_cache
     except Exception as e:
         print(f"Error fetching JWKS: {e}")
+        # Return cached version if available, even if expired
+        if _jwks_cache:
+            return _jwks_cache
         return {"keys": []}
 
 
-def decode_jwt_header(token: str) -> Dict:
-    """Decode JWT header without verification."""
-    import base64
+def get_signing_key(token: str) -> Optional[Dict]:
+    """
+    Get the signing key from JWKS for the given token.
+    
+    Args:
+        token: JWT token to find the signing key for
+        
+    Returns:
+        JWK dict for the signing key, or None if not found
+    """
     try:
-        header_segment = token.split('.')[0]
-        # Add padding if needed
-        padding = 4 - len(header_segment) % 4
-        if padding != 4:
-            header_segment += '=' * padding
-        header = base64.urlsafe_b64decode(header_segment)
-        return json.loads(header)
-    except Exception:
-        return {}
-
-
-def decode_jwt_payload(token: str) -> Dict:
-    """Decode JWT payload without verification (for basic claims)."""
-    import base64
-    try:
-        payload_segment = token.split('.')[1]
-        # Add padding if needed
-        padding = 4 - len(payload_segment) % 4
-        if padding != 4:
-            payload_segment += '=' * padding
-        payload = base64.urlsafe_b64decode(payload_segment)
-        return json.loads(payload)
-    except Exception:
-        return {}
+        # Get the key ID from the token header
+        headers = jwt.get_unverified_header(token)
+        kid = headers.get("kid")
+        
+        if not kid:
+            print("Token missing kid header")
+            return None
+        
+        # Find the matching key in JWKS
+        jwks = get_jwks()
+        for key in jwks.get("keys", []):
+            if key.get("kid") == kid:
+                return key
+        
+        print(f"Key {kid} not found in JWKS")
+        return None
+        
+    except Exception as e:
+        print(f"Error getting signing key: {e}")
+        return None
 
 
 def verify_token(token: str) -> Optional[Dict[str, Any]]:
     """
-    Verify a Cognito JWT token and return the user claims.
+    Verify a Cognito JWT token with CRYPTOGRAPHIC SIGNATURE validation.
+    
+    This function:
+    1. Fetches the public key from Cognito JWKS
+    2. Verifies the token signature using RSA
+    3. Validates expiration, issuer, and audience claims
     
     Args:
         token: JWT token from Authorization header
@@ -78,37 +111,47 @@ def verify_token(token: str) -> Optional[Dict[str, Any]]:
         token = token[7:]
     
     try:
-        # Decode payload (basic verification)
-        payload = decode_jwt_payload(token)
-        
-        if not payload:
+        # Get the signing key from JWKS
+        signing_key = get_signing_key(token)
+        if not signing_key:
             return None
         
-        # Check expiration
-        exp = payload.get("exp", 0)
-        if exp < time.time():
-            print("Token expired")
-            return None
+        # Decode and verify the token with signature validation
+        # python-jose handles signature verification automatically
+        payload = jwt.decode(
+            token,
+            signing_key,
+            algorithms=["RS256"],
+            issuer=COGNITO_ISSUER,
+            options={
+                "verify_aud": False,  # We'll check aud/client_id manually
+                "verify_exp": True,
+                "verify_iss": True,
+            }
+        )
         
-        # Check issuer
-        expected_issuer = f"https://cognito-idp.{AWS_REGION}.amazonaws.com/{COGNITO_USER_POOL_ID}"
-        if payload.get("iss") != expected_issuer:
-            print("Invalid issuer")
-            return None
-        
-        # Check audience (for id tokens) or client_id (for access tokens)
+        # Verify audience/client_id based on token type
         token_use = payload.get("token_use", "")
         if token_use == "id":
             if payload.get("aud") != COGNITO_CLIENT_ID:
-                print("Invalid audience")
+                print("Invalid audience for id token")
                 return None
         elif token_use == "access":
             if payload.get("client_id") != COGNITO_CLIENT_ID:
-                print("Invalid client_id")
+                print("Invalid client_id for access token")
                 return None
         
         return payload
         
+    except jwt.ExpiredSignatureError:
+        print("Token expired")
+        return None
+    except jwt.JWTClaimsError as e:
+        print(f"Token claims error: {e}")
+        return None
+    except JWTError as e:
+        print(f"JWT verification error: {e}")
+        return None
     except Exception as e:
         print(f"Token verification error: {e}")
         return None

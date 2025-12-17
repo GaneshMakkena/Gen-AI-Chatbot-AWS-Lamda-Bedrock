@@ -16,7 +16,7 @@ from datetime import datetime
 
 # Environment variables
 HEALTH_PROFILE_TABLE = os.getenv("HEALTH_PROFILE_TABLE", "medibot-health-profiles-production")
-AWS_REGION = os.getenv("BEDROCK_REGION", "us-east-1")
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 
 # DynamoDB client
 dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)

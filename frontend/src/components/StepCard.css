@@ -1,0 +1,203 @@
+/**
+ * StepCard Component Styles
+ * High contrast, large tap targets, medical-appropriate design
+ */
+
+.step-card {
+  background: var(--card-bg, #ffffff);
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  margin-bottom: 1.5rem;
+  overflow: hidden;
+  border: 1px solid var(--border-color, #e5e7eb);
+  transition: box-shadow 0.2s ease;
+}
+
+.step-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.step-card.degraded {
+  border-color: var(--warning-border, #fbbf24);
+  background: var(--warning-bg, #fffbeb);
+}
+
+/* Step Header */
+.step-header {
+  padding: 1rem 1.25rem;
+  background: var(--header-bg, #f9fafb);
+  border-bottom: 1px solid var(--border-color, #e5e7eb);
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.step-number {
+  background: var(--primary-color, #2563eb);
+  color: white;
+  font-weight: 600;
+  font-size: 0.875rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  white-space: nowrap;
+}
+
+.step-title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-primary, #111827);
+  line-height: 1.4;
+}
+
+/* Step Content */
+.step-content {
+  padding: 1.25rem;
+}
+
+.step-description {
+  margin: 0 0 1rem 0;
+  color: var(--text-secondary, #4b5563);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+/* Image Container */
+.step-image-container {
+  position: relative;
+  background: var(--image-bg, #f3f4f6);
+  border-radius: 8px;
+  overflow: hidden;
+  min-height: 200px;
+}
+
+.step-image {
+  width: 100%;
+  height: auto;
+  display: block;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.step-image.loaded {
+  opacity: 1;
+}
+
+.step-image.loading {
+  opacity: 0;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.image-placeholder {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  color: var(--text-muted, #6b7280);
+  font-size: 0.875rem;
+}
+
+.image-loader {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border-color, #e5e7eb);
+  border-top-color: var(--primary-color, #2563eb);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* No Image State */
+.step-no-image {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: var(--image-bg, #f3f4f6);
+  border-radius: 8px;
+  color: var(--text-muted, #6b7280);
+  gap: 0.5rem;
+}
+
+.no-image-icon {
+  font-size: 2rem;
+  opacity: 0.5;
+}
+
+/* Fallback Panel (when image generation fails) */
+.step-fallback {
+  background: var(--fallback-bg, #fef3c7);
+  border: 1px solid var(--fallback-border, #fbbf24);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.fallback-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  font-size: 0.875rem;
+  color: var(--warning-text, #92400e);
+  font-weight: 500;
+}
+
+.fallback-icon {
+  font-size: 1.25rem;
+}
+
+.fallback-panels {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+}
+
+@media (max-width: 640px) {
+  .fallback-panels {
+    grid-template-columns: 1fr;
+  }
+}
+
+.fallback-panel {
+  background: white;
+  border-radius: 6px;
+  padding: 0.75rem;
+  border: 1px solid var(--border-color, #e5e7eb);
+}
+
+.fallback-panel.warning {
+  border-color: var(--warning-border, #f59e0b);
+  background: #fffbeb;
+}
+
+.fallback-panel.success {
+  border-color: var(--success-border, #10b981);
+  background: #ecfdf5;
+}
+
+.panel-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted, #6b7280);
+  margin-bottom: 0.25rem;
+}
+
+.panel-content {
+  font-size: 0.875rem;
+  color: var(--text-primary, #111827);
+  line-height: 1.4;
+}

@@ -13,11 +13,6 @@ Parameters:
     NoEcho: true
     Description: Google AI API Key for Gemini models
   
-  BedrockBearerToken:
-    Type: String
-    NoEcho: true
-    Description: AWS Bedrock Bearer Token for Titan image generation
-  
   GeminiLlmModel:
     Type: String
     Default: gemini-2.0-flash
@@ -40,16 +35,15 @@ Resources:
       CodeUri: ../backend/
       Handler: lambda_handler.handler
       Runtime: python3.11
-      Timeout: 90  # 90 seconds for image generation
+      Timeout: 300  # 300 seconds (5 mins) for heavy image generation load
       MemorySize: 1024  # 1GB RAM
       Architectures:
-        - arm64  # Cost-effective ARM architecture
+        - x86_64  # Changed from arm64 for build compatibility
+      Tracing: Active  # Enable X-Ray tracing for observability
       Environment:
         Variables:
           GOOGLE_API_KEY: !Ref GoogleApiKey
-          AWS_BEARER_TOKEN_BEDROCK: !Ref BedrockBearerToken
           GEMINI_LLM_MODEL: !Ref GeminiLlmModel
-          BEDROCK_REGION: !Ref AWS::Region
           ENVIRONMENT: !Ref Environment
           IMAGES_BUCKET: !Ref ImagesBucket
           # Phase 2: Auth & Storage
@@ -61,11 +55,6 @@ Resources:
           HEALTH_PROFILE_TABLE: !Ref HealthProfileTable
       Policies:
         - Statement:
-            - Effect: Allow
-              Action:
-                - bedrock:InvokeModel
-                - bedrock:InvokeModelWithResponseStream
-              Resource: "*"
             - Effect: Allow
               Action:
                 - s3:PutObject
@@ -117,6 +106,9 @@ Resources:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: !Ref Environment
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 10
+        ThrottlingRateLimit: 5
       CorsConfiguration:
         AllowOrigins:
           - "https://d17eixu2k5iihu.cloudfront.net"

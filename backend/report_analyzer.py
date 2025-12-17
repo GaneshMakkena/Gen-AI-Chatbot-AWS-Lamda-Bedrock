@@ -24,7 +24,7 @@ from health_profile import (
 # Environment variables
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 REPORTS_BUCKET = os.getenv("REPORTS_BUCKET", "")
-AWS_REGION = os.getenv("BEDROCK_REGION", "us-east-1")
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 
 # S3 client for fetching reports
 s3_client = boto3.client("s3", region_name=AWS_REGION)

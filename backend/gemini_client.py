@@ -18,9 +18,13 @@ from google import genai
 from dotenv import load_dotenv
 load_dotenv()
 
+# Structured logging
+from aws_lambda_powertools import Logger
+logger = Logger(service="medibot")
+
 # Configuration
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
-AWS_REGION = os.getenv("BEDROCK_REGION") or os.getenv("AWS_REGION", "us-east-1")
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 
 # Model IDs
 LLM_MODEL_ID = os.getenv("GEMINI_LLM_MODEL", "gemini-2.5-pro")
@@ -48,7 +52,7 @@ def get_s3_client():
 def upload_image_to_s3(image_bytes: bytes, step_number: str, query_hash: str) -> Optional[str]:
     """Upload image bytes to S3 and return a presigned URL."""
     if not IMAGES_BUCKET:
-        print("IMAGES_BUCKET not configured")
+        logger.warning("IMAGES_BUCKET not configured")
         return None
     
     try:
@@ -67,11 +71,11 @@ def upload_image_to_s3(image_bytes: bytes, step_number: str, query_hash: str) ->
             Params={'Bucket': IMAGES_BUCKET, 'Key': image_key},
             ExpiresIn=7200
         )
-        print(f"Uploaded image to S3: {presigned_url[:80]}...")
+        logger.info("Uploaded image to S3", url=presigned_url[:60])
         return presigned_url
         
     except Exception as e:
-        print(f"Error uploading to S3: {e}")
+        logger.error("Error uploading to S3", error=str(e))
         return None
 
 
@@ -111,46 +115,78 @@ def invoke_llm(
     """
     
     if not client:
-        print("Gemini client not initialized - missing API key")
+        logger.error("Gemini client not initialized - missing API key")
         return None
     
-    # Base system prompt
-    system_prompt = """You are MediBot, an expert medical first aid assistant. You provide thorough, research-based medical guidance.
+    # Formal Medical Assistance System Prompt (Production-Grade)
+    system_prompt = """You are a medical assistance AI designed to provide step-by-step guidance for non-professional users.
 
-## Your Approach:
-1. **Understand the Intent**: Determine if the user has a medical query or is just greeting/chatting.
-2. **For Medical Issues**: Provide comprehensive research and step-by-step treatment.
-3. **For General Chat**: Respond naturally and briefly, offering help.
+## Your Responsibilities:
+
+1. Generate clear, sequential medical assistance steps.
+   - There is NO LIMIT on the number of steps.
+   - Steps must be numbered explicitly from Step 1 to Step N.
+   - Each step must be self-contained and unambiguous.
+
+2. Each step must be suitable for visual explanation.
+   - Avoid vague instructions.
+   - Avoid compound actions in a single step.
+   - Be specific about what, how, and where.
+
+3. Each generated step will be paired with exactly one image.
+   - Step i corresponds to Image i.
+   - Do NOT reference images in your text output.
+
+4. Internally structure each step so it can be visually expanded into:
+   - What to do (primary action)
+   - How to do it (method/technique)
+   - What to avoid (common mistakes/warnings)
+   - Expected outcome (confirmation of success)
+
+5. Maintain medical safety:
+   - Use non-invasive, general guidance only.
+   - NEVER diagnose conditions.
+   - NEVER prescribe medications.
+   - Encourage professional care when risk is high.
+
+6. If uncertainty exists:
+   - Prefer clarity over brevity.
+   - Add cautionary phrasing where appropriate.
 
 ## Response Format:
-**IF (and ONLY IF) the user presents a medical situation or asks for first aid help**, use this format:
 
 **Understanding Your Situation**
 Brief explanation of the condition/problem
 
 **Step-by-Step Treatment Guide**
 
-**Step 1: [Action Title]**
-Detailed instruction for this step
+**Step 1: [Clear Action Title]**
+Detailed instruction (what to do, how, materials needed, timing)
 
-**Step 2: [Action Title]**
-Detailed instruction for this step
+**Step 2: [Clear Action Title]**
+Detailed instruction...
 
-(Continue for all necessary steps)
+(Continue for ALL necessary steps)
 
 **⚠️ Important Warnings**
-Any critical safety information
+Critical safety information, contraindications
 
 **When to Seek Professional Help**
-Conditions that require medical attention
+Conditions that require immediate medical attention
 
 ## Guidelines:
 - Be warm, reassuring, and conversational
 - Explain WHY each step is important
-- Use simple, clear language anyone can understand
-- Be specific about materials needed
-- Include timing information where relevant
-- Never diagnose serious conditions - recommend professional help"""
+- Use simple language anyone can understand
+- Be specific about materials and timing
+- Never skip steps due to assumed knowledge
+
+7. Handling Greetings & Generic Inputs:
+   - If the user says "Hi", "Hello", or is vague:
+   - Respond warmly.
+   - Summarize your capabilities (medical guides, steps, visuals).
+   - Ask specifically what medical concern they have.
+   - DO NOT generate a medical guide for a random condition (like burns or CPR) unless explicitly asked."""
     
     # Add thinking mode instruction if enabled
     if thinking_mode:
@@ -166,8 +202,8 @@ Think through:
 
 Example:
 <thinking>
-The user is asking about treating a minor burn...
-Key considerations: cooling, avoiding ice, pain management...
+The user is asking about [User's Specific Topic]...
+Key considerations: [Safety, Method, Outcome]...
 I should structure this with immediate first aid, then ongoing care...
 </thinking>
 
@@ -177,7 +213,7 @@ Then provide your actual response after the thinking section."""
         full_prompt = f"Context: {context}\n\n{prompt}" if context else prompt
         combined_prompt = f"{system_prompt}\n\nUser: {full_prompt}"
         
-        print(f"Calling Gemini LLM: {LLM_MODEL_ID} (thinking_mode={thinking_mode})")
+        logger.info("Calling Gemini LLM", model=LLM_MODEL_ID, thinking_mode=thinking_mode)
         
         response = client.models.generate_content(
             model=LLM_MODEL_ID,
@@ -200,7 +236,7 @@ Then provide your actual response after the thinking section."""
         return None
             
     except Exception as e:
-        print(f"Error invoking Gemini LLM: {e}")
+        logger.error("Error invoking Gemini LLM", error=str(e))
         import traceback
         print(traceback.format_exc())
         return None
@@ -317,16 +353,7 @@ def generate_image(prompt: str) -> Optional[bytes]:
             contents=enhanced_prompt,
         )
         
-        # Extract image from response parts
-        if response.parts:
-            for part in response.parts:
-                if hasattr(part, 'inline_data') and part.inline_data is not None:
-                    # Get the image data
-                    if hasattr(part.inline_data, 'data'):
-                        print(f"Image generated successfully!")
-                        return part.inline_data.data
-        
-        # Check candidates structure
+        # Try candidates structure first (new SDK format)
         if hasattr(response, 'candidates') and response.candidates:
             for candidate in response.candidates:
                 if hasattr(candidate, 'content') and candidate.content:
@@ -334,8 +361,16 @@ def generate_image(prompt: str) -> Optional[bytes]:
                         for part in candidate.content.parts:
                             if hasattr(part, 'inline_data') and part.inline_data:
                                 if hasattr(part.inline_data, 'data'):
-                                    print(f"Image found in candidates!")
+                                    print(f"Image generated successfully!")
                                     return part.inline_data.data
+        
+        # Fall back to direct parts attribute (old SDK format)
+        if hasattr(response, 'parts') and response.parts:
+            for part in response.parts:
+                if hasattr(part, 'inline_data') and part.inline_data is not None:
+                    if hasattr(part.inline_data, 'data'):
+                        print(f"Image generated successfully!")
+                        return part.inline_data.data
         
         print("No image found in Gemini response")
         if hasattr(response, 'text') and response.text:
@@ -379,86 +414,174 @@ def extract_treatment_steps(llm_response: str) -> List[Dict[str, str]]:
     return steps
 
 
-def create_step_image_prompt(step: Dict[str, str], query: str) -> str:
-    """Create a specific image generation prompt for a treatment step."""
+def create_step_visual_guide_prompt(step: Dict[str, str], query: str) -> str:
+    """
+    Create a 4-panel grid prompt for ONE step.
+    Each panel shows a different aspect of the same step.
+    """
     query_lower = query.lower()
     
+    # Context detection
     context_keywords = {
         "cpr": "CPR cardiopulmonary resuscitation",
         "choking": "Heimlich maneuver choking first aid",
         "bleeding": "wound care bleeding control",
         "burn": "burn treatment first aid",
         "fracture": "bone fracture splinting",
-        "sprain": "sprain treatment RICE",
-        "cut": "wound cleaning bandaging",
         "wound": "wound care treatment",
     }
     
-    medical_context = "first aid treatment"
+    medical_context = "medical first aid"
     for keyword, context in context_keywords.items():
         if keyword in query_lower:
             medical_context = context
             break
-    
-    core_subject = re.sub(r'^(how to|what is|treat|cure)\s+', '', query_lower).strip()
-    
-    prompt = f"Medical illustration for {medical_context} on {core_subject}. Step {step['step_number']}: {step['title']}. "
-    prompt += f"Clear educational diagram showing action on {core_subject}. {step['description'][:100]}. "
-    prompt += "Professional medical illustration, clean white background, anatomically accurate."
-    
+    # Formal Production-Grade Image Prompt Template
+    prompt = f"""Generate a medically informative visual guide using a 2×2 grid layout.
+
+Context:
+This image explains Step {step['step_number']} of a medical assistance guide.
+
+Step Description:
+"{step['title']}: {step['description'][:200]}"
+
+Grid Requirements:
+Each panel must visually represent one sub-direction of the same step:
+
+Top-Left Panel:
+Show the primary action clearly and safely.
+
+Top-Right Panel:
+Show the correct method or technique (posture, tool usage, hand placement).
+
+Bottom-Left Panel:
+Show what NOT to do or common mistakes, using clear visual contrast.
+
+Bottom-Right Panel:
+Show the expected correct outcome or confirmation state.
+
+Visual Style:
+- Clear, instructional, non-graphic
+- Neutral medical illustration style
+- No blood, gore, or invasive depiction
+- High clarity, simple background
+- Universally understandable symbols
+
+Restrictions:
+- Do not add extra steps
+- Do not contradict the step text
+- Do not include text-heavy labels
+- Avoid realism that may cause distress
+
+Purpose:
+This image must act as a complete visual explanation of Step {step['step_number']}.
+"""
     return prompt
 
 
-def process_single_step(step: Dict, query: str, query_hash: Optional[str] = None) -> Dict:
-    """Process a single step: generate prompt, generate image, upload to S3."""
+def process_single_step_image(step: Dict, query: str, query_hash: Optional[str] = None) -> Dict:
+    """
+    Process a single step: generate a dedicated 4-panel image.
+    Includes fallback handling for image generation failures.
+    """
+    step_number = step['step_number']
+    title = step['title']
+    description = step['description'][:200]
+    
+    # Fallback text structure (Tier 2 degradation)
+    fallback_text = {
+        'action': f"Primary action for {title}",
+        'method': f"How to perform: {description[:80]}...",
+        'caution': "Common mistakes to avoid when performing this step.",
+        'result': "Expected outcome when done correctly."
+    }
+    
     try:
-        print(f"Generating image for Step {step['step_number']}: {step['title']}")
+        logger.info("Generating step visual guide", step_number=step_number)
         
-        image_prompt = create_step_image_prompt(step, query)
+        image_prompt = create_step_visual_guide_prompt(step, query)
         image_bytes = generate_image(image_prompt)
         image_url = None
         image_b64 = None
+        image_failed = False
         
         if image_bytes:
             image_b64 = base64.b64encode(image_bytes).decode('utf-8')
             if query_hash:
-                image_url = upload_image_to_s3(image_bytes, step['step_number'], query_hash)
-            
+                image_url = upload_image_to_s3(image_bytes, step_number, query_hash)
+        else:
+            # Tier 1: Image generation returned None
+            image_failed = True
+            logger.warning("Image generation returned None", step=step_number)
+        
         return {
-            'step_number': step['step_number'],
-            'title': step['title'],
-            'description': step['description'][:200],
+            'step_number': step_number,
+            'title': title,
+            'description': description,
             'image_prompt': image_prompt,
             'image': image_b64,
-            'image_url': image_url
+            'image_url': image_url,
+            'is_composite': False,
+            'panel_index': None,
+            'image_failed': image_failed,
+            'fallback_text': fallback_text if image_failed else None
         }
+        
     except Exception as e:
-        print(f"Error processing step {step['step_number']}: {e}")
-        import traceback
-        print(traceback.format_exc())
+        # Tier 1: Exception during image generation
+        logger.error("Error generating step image", step=step_number, error=str(e))
         return {
-            'step_number': step['step_number'],
-            'title': step['title'],
-            'description': step['description'][:200],
+            'step_number': step_number,
+            'title': title,
+            'description': description,
             'image_prompt': None,
             'image': None,
-            'image_url': None
+            'image_url': None,
+            'image_failed': True,
+            'fallback_text': fallback_text
         }
 
 
 def generate_all_step_images(steps: List[Dict], query: str, query_hash: Optional[str] = None) -> List[Dict]:
-    """Generate images for all extracted steps in PARALLEL."""
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+    """
+    Generate images using Step-Aligned Visual Guidance.
+    1 step → 1 image (4-panel grid explaining that step in depth).
+    
+    Time budgeting: Estimates ~3s per image with 5 parallel workers.
+    Leaves 60s buffer before Lambda 300s timeout.
+    """
+    import time as time_module
+    TIME_BUDGET_SECONDS = 240  # Leave 60s buffer before Lambda timeout
+    ESTIMATED_SECONDS_PER_IMAGE = 3  # With 5 parallel workers
+    
+    # Soft limit to prevent timeouts
+    MAX_IMAGES = 10
+    
+    # Time-based limit: how many images can we afford?
+    max_affordable = int(TIME_BUDGET_SECONDS / ESTIMATED_SECONDS_PER_IMAGE)
+    effective_limit = min(MAX_IMAGES, max_affordable)
+    
+    if len(steps) > effective_limit:
+        logger.info("Limiting steps for image generation", 
+                   original=len(steps), 
+                   limit=effective_limit,
+                   reason="time_budget")
+        steps = steps[:effective_limit]
+    
+    logger.info("Generating step-aligned images", step_count=len(steps))
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         future_to_step = {
-            executor.submit(process_single_step, step, query, query_hash): step 
+            executor.submit(process_single_step_image, step, query, query_hash): step
             for step in steps
         }
         
         results = []
         for future in concurrent.futures.as_completed(future_to_step):
-            res = future.result()
-            results.append(res)
+            result = future.result()
+            results.append(result)
     
+    # Sort by step number
     try:
         results.sort(key=lambda x: int(re.sub(r'\D', '', str(x['step_number']))))
     except:

@@ -3,9 +3,8 @@ Unit tests for health_profile.py - Health profile management.
 Tests CRUD operations with mocked DynamoDB.
 """
 
-import pytest
+
 from unittest.mock import patch, MagicMock
-from datetime import datetime
 
 
 class TestGetHealthProfile:
@@ -72,7 +71,7 @@ class TestCreateHealthProfile:
         with patch.object(health_profile, "get_table") as mock_get_table:
             mock_get_table.return_value = mock_table
 
-            result = health_profile.create_health_profile("user-123")
+            health_profile.create_health_profile("user-123")
 
             mock_table.put_item.assert_called_once()
             item = mock_table.put_item.call_args[1]["Item"]
@@ -125,7 +124,7 @@ class TestGetOrCreateProfile:
             with patch.object(health_profile, "create_health_profile") as mock_create:
                 mock_create.return_value = {"user_id": "user-123", "conditions": []}
 
-                result = health_profile.get_or_create_profile("user-123")
+                health_profile.get_or_create_profile("user-123")
 
                 mock_create.assert_called_once_with("user-123")
 

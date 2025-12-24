@@ -3,10 +3,10 @@ Unit tests for chat_history.py - DynamoDB chat operations.
 Tests CRUD operations with mocked DynamoDB.
 """
 
-import pytest
+
 import time
 from unittest.mock import patch, MagicMock
-from botocore.exceptions import ClientError
+
 
 
 class TestGenerateChatId:
@@ -55,7 +55,7 @@ class TestSaveChat:
         with patch.object(chat_history, "get_table") as mock_get_table:
             mock_get_table.return_value = mock_table
 
-            result = chat_history.save_chat(
+            chat_history.save_chat(
                 user_id="user-123",
                 query="How to treat headache?",
                 response="Here are some steps..."
@@ -81,7 +81,7 @@ class TestSaveChat:
         with patch.object(chat_history, "get_table") as mock_get_table:
             mock_get_table.return_value = mock_table
 
-            result = chat_history.save_chat(
+            chat_history.save_chat(
                 user_id="user-123",
                 query="Test query",
                 response="Test response",
@@ -102,7 +102,7 @@ class TestSaveChat:
         with patch.object(chat_history, "get_table") as mock_get_table:
             mock_get_table.return_value = mock_table
 
-            result = chat_history.save_chat(
+            chat_history.save_chat(
                 user_id="user-123",
                 query="Test query",
                 response="Test response",
@@ -130,7 +130,7 @@ class TestSaveChat:
             mock_get_table.return_value = mock_table
 
             before = int(time.time()) + (90 * 24 * 60 * 60) - 10
-            result = chat_history.save_chat(
+            chat_history.save_chat(
                 user_id="user-123",
                 query="Test",
                 response="Test"

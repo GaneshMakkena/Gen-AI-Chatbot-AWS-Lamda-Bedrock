@@ -1,6 +1,3 @@
-
-import sys
-import os
 import sys
 import os
 from fastapi.testclient import TestClient
@@ -71,6 +68,7 @@ def test_chat_endpoint(mock_should, mock_gen_images, mock_extract, mock_invoke, 
     assert data["step_images"][0]["title"] == "Clean the wound"
     assert data["original_query"] == "I have a cut"
 
+
 @patch('api_server.invoke_llm')
 def test_chat_endpoint_error(mock_invoke):
     # Simulate LLM failure
@@ -82,6 +80,7 @@ def test_chat_endpoint_error(mock_invoke):
 
     assert response.status_code == 500
     assert response.json()["detail"] == "Failed to get response from AI"
+
 
 def test_clean_llm_response():
     from gemini_client import clean_llm_response

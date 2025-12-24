@@ -113,7 +113,7 @@ class Attachment(BaseModel):
     filename: str
     content_type: str
     data: Optional[str] = None  # Base64 encoded file data (optional if s3_key provided)
-    s3_key: Optional[str] = None # S3 Key for large files
+    s3_key: Optional[str] = None  # S3 Key for large files
     type: str  # "pdf" or "image"
 
 

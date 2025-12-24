@@ -1,14 +1,15 @@
 
 import sys
 import os
-import pytest
+import sys
+import os
 from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 # Add backend to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from api_server import app
+from api_server import app  # noqa: E402
 
 client = TestClient(app)
 
@@ -39,6 +40,7 @@ MOCK_IMAGE_DATA = {
     "image_url": "http://example.com/image.png"
 }
 
+
 @patch('api_server.detect_language')
 @patch('api_server.translate_to_english')
 @patch('api_server.translate_from_english')
@@ -53,14 +55,14 @@ def test_chat_endpoint(mock_should, mock_gen_images, mock_extract, mock_invoke, 
     mock_should.return_value = True
     mock_extract.return_value = MOCK_STEPS
     mock_gen_images.return_value = [MOCK_IMAGE_DATA]
-    
+
     # Test Request
     response = client.post("/chat", json={
         "query": "I have a cut",
         "language": "English",
         "generate_images": True
     })
-    
+
     # Assertions
     assert response.status_code == 200
     data = response.json()
@@ -73,22 +75,22 @@ def test_chat_endpoint(mock_should, mock_gen_images, mock_extract, mock_invoke, 
 def test_chat_endpoint_error(mock_invoke):
     # Simulate LLM failure
     mock_invoke.return_value = None
-    
+
     response = client.post("/chat", json={
         "query": "Fail me"
     })
-    
+
     assert response.status_code == 500
     assert response.json()["detail"] == "Failed to get response from AI"
 
 def test_clean_llm_response():
     from gemini_client import clean_llm_response
-    
+
     # Test standard cleaning
     raw = "<thinking>Thinking...</thinking>Here is the answer.<thinking>More thoughts</thinking>"
     cleaned = clean_llm_response(raw)
     assert cleaned == "Here is the answer."
-    
+
     # Test with keep_thinking=True
     raw_thinking = "<thinking>My thought process</thinking>\nAnswer"
     cleaned_thinking = clean_llm_response(raw_thinking, keep_thinking=True)

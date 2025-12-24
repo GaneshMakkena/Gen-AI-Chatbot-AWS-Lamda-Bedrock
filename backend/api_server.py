@@ -8,7 +8,6 @@ import base64
 import hashlib
 import uuid
 import time
-import boto3
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.concurrency import run_in_threadpool
@@ -16,60 +15,63 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
+# Structured logging for CloudWatch
+from aws_lambda_powertools import Logger
+
 # Load environment variables
 load_dotenv()
 
-# Structured logging for CloudWatch
-from aws_lambda_powertools import Logger
 logger = Logger(service="medibot")
 
-# Import our modules - Using Gemini
-from gemini_client import (
+# Import our modules
+# Phase 1: Gemini
+from gemini_client import (  # noqa: E402
     invoke_llm,
     generate_image,
     generate_all_step_images,
     extract_treatment_steps,
     should_generate_images,
     detect_medical_topic,
-    upload_image_to_s3,
-    IMAGES_BUCKET,
     LLM_MODEL_ID
 )
-from translation import (
+from translation import (  # noqa: E402
     translate_to_english,
     translate_from_english,
     detect_language,
     SUPPORTED_LANGUAGES
 )
 # Phase 2: Auth and History
-from auth import get_user_info, verify_token
-from chat_history import (
-    save_chat, get_user_chats, get_chat, delete_chat,
-    get_chat_summary, generate_chat_id
+from auth import get_user_info  # noqa: E402
+from chat_history import (  # noqa: E402
+    save_chat,
+    get_user_chats,
+    get_chat,
+    delete_chat,
+    get_chat_summary
 )
 # Phase 2.5: Health Memory RAG
-from health_profile import (
-    get_health_profile, get_context_summary, get_or_create_profile,
-    add_condition, add_medication, add_allergy, update_basic_info,
-    delete_health_profile, remove_condition
+from health_profile import (  # noqa: E402
+    get_context_summary,
+    extract_facts_from_chat  # Note: report_analyzer had extract_facts_from_chat, checking imports
 )
-from report_analyzer import (
-    analyze_report, confirm_and_save_analysis, extract_facts_from_chat
+from report_analyzer import (  # noqa: E402
+    extract_facts_from_chat
 )
+
 # Phase 3: Security & Guest Tracking
-from guest_tracking import (
-    check_guest_limit, increment_guest_message, get_or_create_session
+from guest_tracking import (  # noqa: E402
+    check_guest_limit,
+    increment_guest_message
 )
-from audit_logging import (
-    log_event, log_chat_access, log_guest_event, log_security_event, AuditEvent
+from audit_logging import (  # noqa: E402
+    log_guest_event
 )
 # Phase 4: Monitoring & LLM Safety
-from monitoring import (
-    record_chat_request, record_llm_call, record_image_generation,
-    record_security_event as record_security_metric, flush_metrics
+from monitoring import (  # noqa: E402
+    record_security_event as record_security_metric
 )
-from llm_safety import (
-    check_input_safety, check_output_safety, is_medical_query, SafetyLevel
+from llm_safety import (  # noqa: E402
+    check_input_safety
 )
 
 # Initialize FastAPI app
@@ -175,7 +177,7 @@ class PasswordCheckResponse(BaseModel):
 async def health_check():
     """Health check endpoint."""
     return HealthResponse(
-        status="healthy", 
+        status="healthy",
         version="4.0.0-gemini",
         model=LLM_MODEL_ID
     )
@@ -195,16 +197,16 @@ async def check_password(request: PasswordCheckRequest):
     """
     try:
         from password_history import is_password_previously_used
-        
+
         # Use email as identifier (will be hashed internally)
         is_used = is_password_previously_used(request.email, request.password)
-        
+
         if is_used:
             return PasswordCheckResponse(
                 valid=False,
                 message="This password was used recently. Please choose a different password."
             )
-        
+
         return PasswordCheckResponse(
             valid=True,
             message="Password is valid."
@@ -223,7 +225,7 @@ async def store_password(request: PasswordCheckRequest):
     """
     try:
         from password_history import store_password_hash
-        
+
         success = store_password_hash(request.email, request.password)
         return {"success": success}
     except Exception as e:
@@ -254,13 +256,13 @@ async def get_guest_trial_status(
     """
     # Get client IP (X-Forwarded-For from ALB/CloudFront, or fallback)
     ip_address = x_forwarded_for.split(",")[0].strip() if x_forwarded_for else "unknown"
-    
+
     status = check_guest_limit(
         ip_address=ip_address,
         user_agent=user_agent or "",
         fingerprint=x_fingerprint or ""
     )
-    
+
     return {
         "allowed": status["allowed"],
         "remaining": status["remaining"],
@@ -274,7 +276,7 @@ async def get_guest_trial_status(
 async def chat(request: ChatRequest, authorization: Optional[str] = Header(None)):
     """
     Process a medical question with in-depth research and step-by-step visual instructions.
-    
+
     Features:
     - Thorough medical research using Gemini
     - Extracts treatment steps from the response
@@ -288,13 +290,13 @@ async def chat(request: ChatRequest, authorization: Optional[str] = Header(None)
     request_id = str(uuid.uuid4())[:8]
     request_start = time.time()
     logger.info("Request started", request_id=request_id)
-    
+
     query = request.query.strip()
     language = request.language
-    
+
     if not query:
         raise HTTPException(status_code=400, detail="Query cannot be empty")
-    
+
     # Phase 4: LLM Safety - Input validation (prompt injection detection)
     input_safe, sanitized_query, fallback_response = check_input_safety(query)
     if not input_safe:
@@ -309,23 +311,22 @@ async def chat(request: ChatRequest, authorization: Optional[str] = Header(None)
             steps_count=0
         )
     query = sanitized_query  # Use sanitized query from here on
-    
+
     # Check if user is authenticated (optional)
     user_info = None
     ip_address = "unknown"  # Will be populated for guest tracking
     if authorization:
         user_info = get_user_info(authorization)
-    
+
     # Phase 3: Guest trial enforcement for unauthenticated users
     if not user_info:
         # Get client IP from headers (X-Forwarded-For from CloudFront/ALB)
         # Note: In Lambda, we'd get this from the event, here we use headers
-        from fastapi import Request
         ip_address = "unknown"  # Placeholder - in production, extract from request headers
-        
+
         # Check guest limit
         guest_status = check_guest_limit(ip_address=ip_address)
-        
+
         if not guest_status["allowed"]:
             # Log the blocked attempt
             log_guest_event(
@@ -342,13 +343,13 @@ async def chat(request: ChatRequest, authorization: Optional[str] = Header(None)
                     "message_count": guest_status["message_count"]
                 }
             )
-        
+
         # Increment guest message count (before processing to prevent race conditions)
         increment_result = increment_guest_message(
             ip_address=ip_address,
             query=query[:100]  # Store truncated query for debugging
         )
-        
+
         # Log guest chat event
         log_guest_event(
             guest_id=increment_result["guest_id"],
@@ -356,18 +357,18 @@ async def chat(request: ChatRequest, authorization: Optional[str] = Header(None)
             action="chat",
             details={"remaining": increment_result["remaining"]}
         )
-        
-        logger.info("Guest chat", 
+
+        logger.info("Guest chat",
                    guest_id=increment_result["guest_id"][:12],
                    remaining=increment_result["remaining"])
-    
+
     # Detect input language and translate to English if needed
     detected_lang = detect_language(query)
     english_query = query
-    
+
     if detected_lang != "en":
         english_query, _ = translate_to_english(query, detected_lang)
-    
+
     # Build context from conversation history if provided
     context = ""
     if request.conversation_history:
@@ -375,7 +376,7 @@ async def chat(request: ChatRequest, authorization: Optional[str] = Header(None)
             f"{'User' if msg.get('role') == 'user' else 'Assistant'}: {msg.get('content', '')}"
             for msg in request.conversation_history[-4:]  # Last 4 messages for context
         ])
-    
+
     # Phase 2.5: Inject health context for personalized RAG
     health_context = ""
     if user_info:
@@ -384,22 +385,22 @@ async def chat(request: ChatRequest, authorization: Optional[str] = Header(None)
             logger.info("Injecting health context", user_id=user_info['user_id'][:8])
             # Prepend health context to conversation context
             context = health_context + "\n" + context
-    
+
     # Process file attachments if present
     response = None
     if request.attachments and len(request.attachments) > 0:
         logger.info("Processing attachments", count=len(request.attachments))
-        
+
         # Import multimodal function
         from gemini_client import invoke_llm_with_files
-        from report_analyzer import get_report_from_s3, analyze_report
-        
+        from report_analyzer import get_report_from_s3
+
         # Prepare file parts
         file_parts = []
-        
+
         # Background tasks for report analysis
         report_tasks = []
-        
+
         for att in request.attachments:
             try:
                 # Handle S3-based attachments (large files)
@@ -410,19 +411,19 @@ async def chat(request: ChatRequest, authorization: Optional[str] = Header(None)
                     if not file_bytes:
                         logger.error("Failed to fetch S3 attachment", key=att.s3_key)
                         continue
-                        
+
                     file_parts.append({
                         "data": file_bytes,
                         "mime_type": att.content_type,
                         "filename": att.filename
                     })
-                    
+
                     # If this is a PDF, queue for profile analysis
                     if att.type == "pdf" and user_info:
                         # We'll run this async after responding relative to user query
                         # For now, just logging intent (in real prod, use background_tasks or SQS)
                         report_tasks.append(att.s3_key)
-                        
+
                 # Handle Base64 direct attachments (legacy/small files)
                 elif att.data:
                     file_bytes = base64.b64decode(att.data)
@@ -433,7 +434,7 @@ async def chat(request: ChatRequest, authorization: Optional[str] = Header(None)
                     })
             except Exception as e:
                 logger.error("Failed to process attachment", filename=att.filename, error=str(e))
-        
+
         if file_parts:
             # Call multimodal LLM with files (run in threadpool to avoid blocking event loop)
             response = await run_in_threadpool(
@@ -452,12 +453,12 @@ async def chat(request: ChatRequest, authorization: Optional[str] = Header(None)
                         logger.info("Triggering background report analysis", key=s3_key)
                         # Fire and forget analysis (should use BackgroundTasks in FastAPI, but run_in_threadpool ok for demo)
                         # We are NOT awaiting this to avoid blocking the chat response
-                        # In a real async pattern, this would be cleaner. 
+                        # In a real async pattern, this would be cleaner.
                         # For this demo, let's keep it simple and assume user asks about the report now.
-                        pass 
+                        pass
                 except Exception as e:
                     logger.error("Background analysis trigger failed", error=str(e))
-    
+
     # Standard LLM call (no attachments)
     if not response:
         logger.info("Processing query", request_id=request_id, query=english_query[:50], thinking_mode=request.thinking_mode)
@@ -468,41 +469,41 @@ async def chat(request: ChatRequest, authorization: Optional[str] = Header(None)
         )
         llm_duration_ms = int((time.time() - llm_start) * 1000)
         logger.info("LLM completed", request_id=request_id, duration_ms=llm_duration_ms)
-    
+
     if not response:
         logger.error("LLM failed to respond", request_id=request_id)
         raise HTTPException(status_code=500, detail="Failed to get response from AI")
-    
+
     # Translate response back if needed
     final_response = response
     target_lang = SUPPORTED_LANGUAGES.get(language, "en")
-    
+
     if target_lang != "en":
         final_response = translate_from_english(response, target_lang)
-    
+
     # Detect topic
     topic = detect_medical_topic(english_query)
-    
+
     # Generate step-by-step images
     step_images_list = None
     all_images = []
     primary_image = None
-    
+
     if request.generate_images and should_generate_images(english_query, response):
         # Extract treatment steps from the LLM response
         steps = extract_treatment_steps(response)
         logger.info("Extracted treatment steps", count=len(steps))
-        
+
         if steps:
             # Generate a unique hash for this query (for S3 path organization)
             query_hash = hashlib.md5(english_query.encode()).hexdigest()[:12]
-            
+
             # Step-Aligned Visual Guidance:
             # Each step gets its own 4-panel image (Action, Method, Warning, Outcome)
             # Soft limit of 10 images is handled in gemini_client.generate_all_step_images
-            
+
             logger.info("Generating step-aligned visual guides", request_id=request_id, steps_count=len(steps))
-            
+
             # Pass query_hash to enable internal parallel S3 upload
             # Run in threadpool to avoid blocking event loop
             image_gen_start = time.time()
@@ -511,18 +512,18 @@ async def chat(request: ChatRequest, authorization: Optional[str] = Header(None)
             )
             image_gen_duration_ms = int((time.time() - image_gen_start) * 1000)
             failed_count = sum(1 for s in step_images_data if s.get('image_failed'))
-            logger.info("Image generation completed", 
-                       request_id=request_id, 
-                       duration_ms=image_gen_duration_ms, 
+            logger.info("Image generation completed",
+                       request_id=request_id,
+                       duration_ms=image_gen_duration_ms,
                        total_images=len(step_images_data),
                        failed_images=failed_count)
-            
+
             # Convert to response format
             step_images_list = []
             for step_data in step_images_data:
                 image_url = step_data.get('image_url')
                 image_base64 = step_data.get('image')
-                
+
                 step_images_list.append(StepImage(
                     step_number=step_data['step_number'],
                     title=step_data['title'],
@@ -533,15 +534,15 @@ async def chat(request: ChatRequest, authorization: Optional[str] = Header(None)
                     is_composite=step_data.get('is_composite', False),
                     panel_index=step_data.get('panel_index')
                 ))
-                
+
                 if image_url:
                     all_images.append(image_url)
                 elif image_base64:
                     all_images.append(image_base64)
-            
+
             if all_images:
                 primary_image = all_images[0]
-    
+
     # Save chat to DynamoDB if user is authenticated
     if user_info:
         try:
@@ -555,7 +556,7 @@ async def chat(request: ChatRequest, authorization: Optional[str] = Header(None)
                 }
                 for img in step_images_list
             ] if step_images_list else []
-            
+
             # Serialize attachments from request
             attachments_data = [
                 {
@@ -565,7 +566,7 @@ async def chat(request: ChatRequest, authorization: Optional[str] = Header(None)
                 }
                 for att in (request.attachments or [])
             ] if request.attachments else []
-            
+
             save_chat(
                 user_id=user_info["user_id"],
                 query=query,
@@ -580,7 +581,7 @@ async def chat(request: ChatRequest, authorization: Optional[str] = Header(None)
         except Exception as e:
             logger.error("Failed to save chat", error=str(e))
             # Don't fail the request if chat save fails
-        
+
         # Phase 2.5: Extract health facts from user's message (background task)
         try:
             extracted = extract_facts_from_chat(user_info["user_id"], query, final_response)
@@ -588,14 +589,14 @@ async def chat(request: ChatRequest, authorization: Optional[str] = Header(None)
                 logger.info("Extracted facts", facts=extracted)
         except Exception as e:
             logger.error("Failed to extract facts", error=str(e))
-    
+
     # Log total request duration
     total_duration_ms = int((time.time() - request_start) * 1000)
-    logger.info("Request completed", 
-               request_id=request_id, 
+    logger.info("Request completed",
+               request_id=request_id,
                total_duration_ms=total_duration_ms,
                steps_count=len(step_images_list) if step_images_list else 0)
-    
+
     return ChatResponse(
         answer=final_response,
         original_query=query,
@@ -616,10 +617,10 @@ async def create_image(request: ImageRequest):
         width=request.width,
         height=request.height
     )
-    
+
     if not image_b64:
         raise HTTPException(status_code=500, detail="Failed to generate image")
-    
+
     return ImageResponse(image=image_b64, prompt=request.prompt)
 
 
@@ -684,7 +685,7 @@ async def verify_auth(authorization: Optional[str] = Header(None)):
     """Verify if the user's token is valid."""
     if not authorization:
         return {"authenticated": False, "message": "No token provided"}
-    
+
     user = get_user_info(authorization)
     if user:
         return {"authenticated": True, "user": user}
@@ -696,11 +697,11 @@ async def get_current_user(authorization: Optional[str] = Header(None)):
     """Get current user information."""
     if not authorization:
         raise HTTPException(status_code=401, detail="Authorization required")
-    
+
     user = get_user_info(authorization)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-    
+
     return UserInfo(
         user_id=user.get("user_id", ""),
         email=user.get("email", ""),
@@ -727,14 +728,14 @@ async def list_chat_history(
     """Get user's chat history (requires auth)."""
     if not authorization:
         raise HTTPException(status_code=401, detail="Authorization required")
-    
+
     user = get_user_info(authorization)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-    
+
     result = get_user_chats(user["user_id"], limit=limit)
     items = [get_chat_summary(chat) for chat in result.get("items", [])]
-    
+
     return ChatHistoryResponse(
         items=[ChatHistoryItem(**item) for item in items],
         count=len(items),
@@ -750,15 +751,15 @@ async def get_chat_detail(
     """Get a specific chat with full details."""
     if not authorization:
         raise HTTPException(status_code=401, detail="Authorization required")
-    
+
     user = get_user_info(authorization)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-    
+
     chat = get_chat(user["user_id"], chat_id)
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
-    
+
     return ChatDetailResponse(
         chat_id=chat.get("chat_id", ""),
         query=chat.get("query", ""),
@@ -780,11 +781,11 @@ async def delete_chat_endpoint(
     """Delete a specific chat."""
     if not authorization:
         raise HTTPException(status_code=401, detail="Authorization required")
-    
+
     user = get_user_info(authorization)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-    
+
     success = delete_chat(user["user_id"], chat_id)
     if success:
         return {"message": "Chat deleted", "chat_id": chat_id}
@@ -800,28 +801,28 @@ async def get_upload_url(
     """Get a presigned URL to upload a medical report."""
     if not authorization:
         raise HTTPException(status_code=401, detail="Authorization required")
-    
+
     user = get_user_info(authorization)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-    
+
     if not REPORTS_BUCKET:
         raise HTTPException(status_code=500, detail="Reports bucket not configured")
-    
+
     # Validate content type
     allowed_types = ["application/pdf", "image/jpeg", "image/png", "image/jpg"]
     if request.content_type not in allowed_types:
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail=f"Invalid content type. Allowed: {allowed_types}"
         )
-    
+
     # Generate unique file key
     import uuid
     import time
     file_ext = request.filename.split(".")[-1] if "." in request.filename else "pdf"
     file_key = f"reports/{user['user_id']}/{int(time.time())}_{uuid.uuid4().hex[:8]}.{file_ext}"
-    
+
     # Generate presigned URL
     s3 = boto3.client('s3', region_name=os.getenv("AWS_REGION", "us-east-1"))
     try:
@@ -834,7 +835,7 @@ async def get_upload_url(
             },
             ExpiresIn=3600  # 1 hour
         )
-        
+
         return UploadUrlResponse(
             upload_url=upload_url,
             file_key=file_key,
@@ -885,13 +886,13 @@ async def get_profile(authorization: Optional[str] = Header(None)):
     """Get user's health profile."""
     if not authorization:
         raise HTTPException(status_code=401, detail="Authorization required")
-    
+
     user = get_user_info(authorization)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-    
+
     profile = get_or_create_profile(user["user_id"])
-    
+
     return {
         "user_id": profile.get("user_id", ""),
         "conditions": profile.get("conditions", []),
@@ -914,32 +915,32 @@ async def update_profile(
     """Update user's health profile manually."""
     if not authorization:
         raise HTTPException(status_code=401, detail="Authorization required")
-    
+
     user = get_user_info(authorization)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-    
+
     user_id = user["user_id"]
-    
+
     # Add conditions
     if request.conditions:
         for condition in request.conditions:
             add_condition(user_id, condition, source="manual")
-    
+
     # Add medications
     if request.medications:
         for med in request.medications:
             add_medication(user_id, med.get("name", ""), med.get("dosage", ""), source="manual")
-    
+
     # Add allergies
     if request.allergies:
         for allergy in request.allergies:
             add_allergy(user_id, allergy, source="manual")
-    
+
     # Update basic info
     if any([request.age, request.gender, request.blood_type]):
         update_basic_info(user_id, age=request.age, gender=request.gender, blood_type=request.blood_type)
-    
+
     return {"message": "Profile updated", "user_id": user_id}
 
 
@@ -948,11 +949,11 @@ async def delete_profile(authorization: Optional[str] = Header(None)):
     """Delete user's entire health profile."""
     if not authorization:
         raise HTTPException(status_code=401, detail="Authorization required")
-    
+
     user = get_user_info(authorization)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-    
+
     success = delete_health_profile(user["user_id"])
     if success:
         return {"message": "Profile deleted"}
@@ -967,11 +968,11 @@ async def remove_profile_condition(
     """Remove a specific condition from user's profile."""
     if not authorization:
         raise HTTPException(status_code=401, detail="Authorization required")
-    
+
     user = get_user_info(authorization)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-    
+
     success = remove_condition(user["user_id"], condition_name)
     if success:
         return {"message": f"Condition '{condition_name}' removed"}
@@ -986,16 +987,16 @@ async def analyze_uploaded_report(
     """Analyze an uploaded medical report using Gemini multimodal."""
     if not authorization:
         raise HTTPException(status_code=401, detail="Authorization required")
-    
+
     user = get_user_info(authorization)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-    
+
     result = analyze_report(request.file_key, user["user_id"])
-    
+
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("error", "Analysis failed"))
-    
+
     return result
 
 
@@ -1007,16 +1008,16 @@ async def confirm_report_analysis(
     """Confirm and save extracted health information from a report."""
     if not authorization:
         raise HTTPException(status_code=401, detail="Authorization required")
-    
+
     user = get_user_info(authorization)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-    
+
     result = confirm_and_save_analysis(user["user_id"], request.extracted, request.file_key)
-    
+
     if not result.get("success"):
         raise HTTPException(status_code=500, detail=result.get("error", "Save failed"))
-    
+
     return result
 
 
@@ -1032,23 +1033,23 @@ async def generate_presigned_url(
     """Generate a presigned URL for uploading files to S3."""
     if not authorization:
         raise HTTPException(status_code=401, detail="Authorization required")
-    
+
     user_info = get_user_info(authorization)
     if not user_info:
         raise HTTPException(status_code=401, detail="Invalid token")
-    
+
     user_id = user_info["user_id"]
     file_ext = request.filename.split(".")[-1].lower()
-    
+
     # Generate unique key: uploads/{user_id}/{timestamp}_{uuid}.{ext}
     key = f"uploads/{user_id}/{int(time.time())}_{uuid.uuid4().hex[:8]}.{file_ext}"
-    
+
     try:
         from report_analyzer import REPORTS_BUCKET, s3_client
-        
+
         if not REPORTS_BUCKET:
             raise HTTPException(status_code=500, detail="Storage not configured")
-        
+
         # Generate presigned URL
         presigned_url = s3_client.generate_presigned_url(
             'put_object',
@@ -1059,7 +1060,7 @@ async def generate_presigned_url(
             },
             ExpiresIn=300  # 5 minutes
         )
-        
+
         return {
             "upload_url": presigned_url,
             "s3_key": key

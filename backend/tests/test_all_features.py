@@ -4,10 +4,8 @@ Phase 1 & Phase 2 Feature Testing
 """
 
 import requests
-import json
 import time
 import boto3
-from typing import Dict, Any
 
 # Configuration
 API_URL = "https://khucwqfzv4.execute-api.us-east-1.amazonaws.com/production"
@@ -105,7 +103,7 @@ def test_chat_medical_query():
     assert "answer" in data
     # Check for step-by-step format
     assert "step" in data["answer"].lower(), "Expected step-by-step response"
-    return f"Steps detected in response"
+    return "Steps detected in response"
 
 
 def test_chat_multilingual_telugu():
@@ -118,7 +116,7 @@ def test_chat_multilingual_telugu():
     assert response.status_code == 200
     data = response.json()
     assert "answer" in data
-    return f"Telugu response received"
+    return "Telugu response received"
 
 
 # --- Image Generation Tests ---
@@ -173,7 +171,7 @@ def test_images_uploaded_to_s3():
 def test_s3_images_bucket_exists():
     """Test 4.1: Images S3 bucket exists"""
     s3 = boto3.client('s3', region_name=REGION)
-    response = s3.head_bucket(Bucket=IMAGES_BUCKET)
+    s3.head_bucket(Bucket=IMAGES_BUCKET)
     return f"Bucket exists: {IMAGES_BUCKET}"
 
 
@@ -268,7 +266,7 @@ def test_dynamodb_ttl_enabled():
 def test_reports_bucket_exists():
     """Test 7.1: Reports S3 bucket exists"""
     s3 = boto3.client('s3', region_name=REGION)
-    response = s3.head_bucket(Bucket=REPORTS_BUCKET)
+    s3.head_bucket(Bucket=REPORTS_BUCKET)
     return f"Bucket exists: {REPORTS_BUCKET}"
 
 
@@ -277,8 +275,8 @@ def test_reports_bucket_is_private():
     s3 = boto3.client('s3', region_name=REGION)
     response = s3.get_public_access_block(Bucket=REPORTS_BUCKET)
     config = response.get("PublicAccessBlockConfiguration", {})
-    assert config.get("BlockPublicAcls") == True, "Public ACLs not blocked"
-    assert config.get("BlockPublicPolicy") == True, "Public policy not blocked"
+    assert config.get("BlockPublicAcls") is True, "Public ACLs not blocked"
+    assert config.get("BlockPublicPolicy") is True, "Public policy not blocked"
     return "All public access blocked"
 
 
@@ -301,7 +299,7 @@ def test_lambda_has_cognito_config():
     env_vars = response.get("Environment", {}).get("Variables", {})
     assert "COGNITO_USER_POOL_ID" in env_vars, "COGNITO_USER_POOL_ID missing"
     assert "COGNITO_CLIENT_ID" in env_vars, "COGNITO_CLIENT_ID missing"
-    return f"Cognito config present"
+    return "Cognito config present"
 
 
 def test_lambda_has_dynamodb_config():

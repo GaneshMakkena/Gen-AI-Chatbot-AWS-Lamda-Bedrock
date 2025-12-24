@@ -13,13 +13,14 @@ from typing import Optional, Dict, Any, List
 
 # NEW SDK - google-genai (not google-generativeai)
 from google import genai
-
-# Load environment variables
 from dotenv import load_dotenv
-load_dotenv()
 
 # Structured logging
 from aws_lambda_powertools import Logger
+
+# Load environment variables
+load_dotenv()
+
 logger = Logger(service="medibot")
 
 # Configuration
@@ -54,10 +55,10 @@ def upload_image_to_s3(image_bytes: bytes, step_number: str, query_hash: str) ->
     if not IMAGES_BUCKET:
         logger.warning("IMAGES_BUCKET not configured")
         return None, None
-    
+
     try:
         image_key = f"steps/{query_hash}/step_{step_number}_{uuid.uuid4().hex[:8]}.png"
-        
+
         s3 = get_s3_client()
         s3.put_object(
             Bucket=IMAGES_BUCKET,
@@ -65,7 +66,7 @@ def upload_image_to_s3(image_bytes: bytes, step_number: str, query_hash: str) ->
             ContentType='image/png',
             Body=image_bytes
         )
-        
+
         # Generate URL valid for 7 days (max practical for S3)
         presigned_url = s3.generate_presigned_url(
             'get_object',
@@ -74,7 +75,7 @@ def upload_image_to_s3(image_bytes: bytes, step_number: str, query_hash: str) ->
         )
         logger.info("Uploaded image to S3", key=image_key)
         return presigned_url, image_key
-        
+
     except Exception as e:
         logger.error("Error uploading to S3", error=str(e))
         return None, None
@@ -84,7 +85,7 @@ def clean_llm_response(response: str, keep_thinking: bool = False) -> str:
     """Clean the LLM response by optionally removing thinking tags."""
     if not response:
         return response
-    
+
     if not keep_thinking:
         # Remove thinking tags if user doesn't want to see them
         cleaned = re.sub(r'<thinking>.*?</thinking>', '', response, flags=re.DOTALL)
@@ -92,7 +93,7 @@ def clean_llm_response(response: str, keep_thinking: bool = False) -> str:
         # Format thinking sections nicely for display
         cleaned = re.sub(r'<thinking>', '\n\n---\n**🧠 My Thinking Process:**\n', response)
         cleaned = re.sub(r'</thinking>', '\n\n---\n\n', cleaned)
-    
+
     cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
     return cleaned.strip()
 
@@ -106,7 +107,7 @@ def invoke_llm(
 ) -> Optional[str]:
     """
     Invoke Gemini for medical research and treatment instructions.
-    
+
     Args:
         prompt: User's query
         context: Additional context
@@ -114,11 +115,11 @@ def invoke_llm(
         temperature: Creativity level (0-1)
         thinking_mode: If True, show the model's reasoning process
     """
-    
+
     if not client:
         logger.error("Gemini client not initialized - missing API key")
         return None
-    
+
     # Formal Medical Assistance System Prompt (Production-Grade)
     system_prompt = """You are a medical assistance AI designed to provide step-by-step guidance for non-professional users.
 
@@ -188,13 +189,13 @@ Conditions that require immediate medical attention
    - Summarize your capabilities (medical guides, steps, visuals).
    - Ask specifically what medical concern they have.
    - DO NOT generate a medical guide for a random condition (like burns or CPR) unless explicitly asked."""
-    
+
     # Add thinking mode instruction if enabled
     if thinking_mode:
         system_prompt += """
 
 ## Thinking Mode (ENABLED)
-Before providing your response, you MUST first show your reasoning process inside <thinking></thinking> tags. 
+Before providing your response, you MUST first show your reasoning process inside <thinking></thinking> tags.
 Think through:
 - What is the user asking?
 - What medical knowledge applies here?
@@ -209,18 +210,18 @@ I should structure this with immediate first aid, then ongoing care...
 </thinking>
 
 Then provide your actual response after the thinking section."""
-    
+
     try:
         full_prompt = f"Context: {context}\n\n{prompt}" if context else prompt
         combined_prompt = f"{system_prompt}\n\nUser: {full_prompt}"
-        
+
         logger.info("Calling Gemini LLM", model=LLM_MODEL_ID, thinking_mode=thinking_mode)
-        
+
         response = client.models.generate_content(
             model=LLM_MODEL_ID,
             contents=combined_prompt,
         )
-        
+
         # Extract text from response
         response_text = None
         if response.text:
@@ -230,12 +231,12 @@ Then provide your actual response after the thinking section."""
                 if hasattr(part, 'text') and part.text:
                     response_text = part.text
                     break
-        
+
         if response_text:
             return clean_llm_response(response_text, keep_thinking=thinking_mode)
-        
+
         return None
-            
+
     except Exception as e:
         logger.error("Error invoking Gemini LLM", error=str(e))
         import traceback
@@ -251,21 +252,21 @@ def invoke_llm_with_files(
 ) -> Optional[str]:
     """
     Invoke Gemini with file attachments (PDFs, images).
-    
+
     Args:
         prompt: User's query
         files: List of dicts with 'data' (bytes), 'mime_type', 'filename'
         context: Additional context
         thinking_mode: If True, show model reasoning
     """
-    
+
     if not client:
         print("Gemini client not initialized - missing API key")
         return None
-    
+
     try:
         from google.genai import types
-        
+
         # Build system prompt for file analysis
         system_prompt = """You are MediBot, an expert medical assistant. You are analyzing medical documents and images provided by the user.
 
@@ -282,17 +283,17 @@ def invoke_llm_with_files(
 - Explain medical terms in simple language
 - Always recommend consulting a healthcare professional for medical decisions
 """
-        
+
         if thinking_mode:
             system_prompt += "\n\nShow your thinking process in <thinking>...</thinking> tags before your response."
-        
+
         # Build content parts
         content_parts = []
-        
+
         # Add text prompt
         full_prompt = f"Context: {context}\n\n{prompt}" if context else prompt
         content_parts.append(f"{system_prompt}\n\nUser: {full_prompt}")
-        
+
         # Add file parts
         for f in files:
             try:
@@ -304,14 +305,14 @@ def invoke_llm_with_files(
                 print(f"Added file: {f.get('filename', 'unknown')} ({f['mime_type']})")
             except Exception as e:
                 print(f"Failed to add file {f.get('filename')}: {e}")
-        
+
         print(f"Calling Gemini with {len(files)} files (model={LLM_MODEL_ID})")
-        
+
         response = client.models.generate_content(
             model=LLM_MODEL_ID,
             contents=content_parts,
         )
-        
+
         # Extract text from response
         response_text = None
         if response.text:
@@ -321,12 +322,12 @@ def invoke_llm_with_files(
                 if hasattr(part, 'text') and part.text:
                     response_text = part.text
                     break
-        
+
         if response_text:
             return clean_llm_response(response_text, keep_thinking=thinking_mode)
-        
+
         return None
-        
+
     except Exception as e:
         print(f"Error invoking Gemini with files: {e}")
         import traceback
@@ -343,17 +344,17 @@ def generate_image(prompt: str) -> Optional[bytes]:
     if not client:
         print("Gemini client not initialized - missing API key")
         return None
-    
+
     try:
         enhanced_prompt = f"Create a clear, professional medical illustration: {prompt}. Style: educational diagram, clean white background, anatomically accurate."
-        
+
         print(f"Generating image with Gemini: {IMAGE_MODEL_ID}")
-        
+
         response = client.models.generate_content(
             model=IMAGE_MODEL_ID,
             contents=enhanced_prompt,
         )
-        
+
         # Try candidates structure first (new SDK format)
         if hasattr(response, 'candidates') and response.candidates:
             for candidate in response.candidates:
@@ -362,22 +363,22 @@ def generate_image(prompt: str) -> Optional[bytes]:
                         for part in candidate.content.parts:
                             if hasattr(part, 'inline_data') and part.inline_data:
                                 if hasattr(part.inline_data, 'data'):
-                                    print(f"Image generated successfully!")
+                                    print("Image generated successfully!")
                                     return part.inline_data.data
-        
+
         # Fall back to direct parts attribute (old SDK format)
         if hasattr(response, 'parts') and response.parts:
             for part in response.parts:
                 if hasattr(part, 'inline_data') and part.inline_data is not None:
                     if hasattr(part.inline_data, 'data'):
-                        print(f"Image generated successfully!")
+                        print("Image generated successfully!")
                         return part.inline_data.data
-        
+
         print("No image found in Gemini response")
         if hasattr(response, 'text') and response.text:
             print(f"Response text: {response.text[:200]}...")
         return None
-            
+
     except Exception as e:
         print(f"Error generating image with Gemini: {e}")
         import traceback
@@ -388,30 +389,30 @@ def generate_image(prompt: str) -> Optional[bytes]:
 def extract_treatment_steps(llm_response: str) -> List[Dict[str, str]]:
     """Parse the LLM response to extract individual treatment steps."""
     steps = []
-    
+
     step_pattern = r'\*?\*?Step\s*(\d+)[:\s]*\*?\*?\s*\[?([^\]\n]+)\]?\*?\*?'
     matches = list(re.finditer(step_pattern, llm_response, re.IGNORECASE))
-    
+
     for i, match in enumerate(matches):
         step_num = match.group(1)
         title = match.group(2).strip().strip('*[]')
-        
+
         start_pos = match.end()
         if i + 1 < len(matches):
             end_pos = matches[i + 1].start()
         else:
             next_section = re.search(r'\n\*\*[^S]', llm_response[start_pos:])
             end_pos = start_pos + next_section.start() if next_section else len(llm_response)
-        
+
         description = llm_response[start_pos:end_pos].strip()
         description = re.sub(r'^\*?\*?\s*', '', description)[:300]
-        
+
         steps.append({
             'step_number': step_num,
             'title': title,
             'description': description
         })
-    
+
     return steps
 
 
@@ -421,22 +422,7 @@ def create_step_visual_guide_prompt(step: Dict[str, str], query: str) -> str:
     Each panel shows a different aspect of the same step.
     """
     query_lower = query.lower()
-    
-    # Context detection
-    context_keywords = {
-        "cpr": "CPR cardiopulmonary resuscitation",
-        "choking": "Heimlich maneuver choking first aid",
-        "bleeding": "wound care bleeding control",
-        "burn": "burn treatment first aid",
-        "fracture": "bone fracture splinting",
-        "wound": "wound care treatment",
-    }
-    
-    medical_context = "medical first aid"
-    for keyword, context in context_keywords.items():
-        if keyword in query_lower:
-            medical_context = context
-            break
+
     # Formal Production-Grade Image Prompt Template
     prompt = f"""Generate a medically informative visual guide using a 2×2 grid layout.
 
@@ -488,7 +474,7 @@ def process_single_step_image(step: Dict, query: str, query_hash: Optional[str] 
     step_number = step['step_number']
     title = step['title']
     description = step['description'][:200]
-    
+
     # Fallback text structure (Tier 2 degradation)
     fallback_text = {
         'action': f"Primary action for {title}",
@@ -496,17 +482,17 @@ def process_single_step_image(step: Dict, query: str, query_hash: Optional[str] 
         'caution': "Common mistakes to avoid when performing this step.",
         'result': "Expected outcome when done correctly."
     }
-    
+
     try:
         logger.info("Generating step visual guide", step_number=step_number)
-        
+
         image_prompt = create_step_visual_guide_prompt(step, query)
         image_bytes = generate_image(image_prompt)
         image_url = None
         image_b64 = None
         image_failed = False
         s3_key = None
-        
+
         if image_bytes:
             image_b64 = base64.b64encode(image_bytes).decode('utf-8')
             if query_hash:
@@ -515,7 +501,7 @@ def process_single_step_image(step: Dict, query: str, query_hash: Optional[str] 
             # Tier 1: Image generation returned None
             image_failed = True
             logger.warning("Image generation returned None", step=step_number)
-        
+
         return {
             'step_number': step_number,
             'title': title,
@@ -529,7 +515,7 @@ def process_single_step_image(step: Dict, query: str, query_hash: Optional[str] 
             'image_failed': image_failed,
             'fallback_text': fallback_text if image_failed else None
         }
-        
+
     except Exception as e:
         # Tier 1: Exception during image generation
         logger.error("Error generating step image", step=step_number, error=str(e))
@@ -549,61 +535,61 @@ def generate_all_step_images(steps: List[Dict], query: str, query_hash: Optional
     """
     Generate images using Step-Aligned Visual Guidance.
     1 step → 1 image (4-panel grid explaining that step in depth).
-    
+
     Time budgeting: Estimates ~3s per image with 5 parallel workers.
     Leaves 60s buffer before Lambda 300s timeout.
     """
     import time as time_module
     TIME_BUDGET_SECONDS = 240  # Leave 60s buffer before Lambda timeout
     ESTIMATED_SECONDS_PER_IMAGE = 3  # With 5 parallel workers
-    
+
     # Soft limit to prevent timeouts
     MAX_IMAGES = 10
-    
+
     # Time-based limit: how many images can we afford?
     max_affordable = int(TIME_BUDGET_SECONDS / ESTIMATED_SECONDS_PER_IMAGE)
     effective_limit = min(MAX_IMAGES, max_affordable)
-    
+
     if len(steps) > effective_limit:
-        logger.info("Limiting steps for image generation", 
-                   original=len(steps), 
+        logger.info("Limiting steps for image generation",
+                   original=len(steps),
                    limit=effective_limit,
                    reason="time_budget")
         steps = steps[:effective_limit]
-    
+
     logger.info("Generating step-aligned images", step_count=len(steps))
-    
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         future_to_step = {
             executor.submit(process_single_step_image, step, query, query_hash): step
             for step in steps
         }
-        
+
         results = []
         for future in concurrent.futures.as_completed(future_to_step):
             result = future.result()
             results.append(result)
-    
+
     # Sort by step number
     try:
         results.sort(key=lambda x: int(re.sub(r'\D', '', str(x['step_number']))))
-    except:
+    except Exception:
         pass
-        
+
     return results
 
 
 def should_generate_images(query: str, response: str) -> bool:
     """Determine if step-by-step images should be generated."""
     visual_keywords = [
-        "cpr", "cardiopulmonary", "chest compression", "heimlich", 
+        "cpr", "cardiopulmonary", "chest compression", "heimlich",
         "bandage", "wrap", "splint", "immobilize", "position",
         "wound", "cut", "bleeding", "burn", "fracture", "sprain",
         "treat", "treatment", "first aid", "apply", "clean", "dress",
         "choking", "fainting", "unconscious", "recovery position",
         "how to", "steps", "procedure"
     ]
-    
+
     combined_text = (query + " " + response).lower()
     return any(keyword in combined_text for keyword in visual_keywords)
 
@@ -611,7 +597,7 @@ def should_generate_images(query: str, response: str) -> bool:
 def detect_medical_topic(query: str) -> Optional[str]:
     """Detect the primary medical topic from the query."""
     query_lower = query.lower()
-    
+
     topics = {
         "cpr": ["cpr", "cardiopulmonary", "chest compression", "cardiac arrest"],
         "choking": ["choking", "heimlich", "can't breathe", "airway blocked"],
@@ -621,11 +607,11 @@ def detect_medical_topic(query: str) -> Optional[str]:
         "fainting": ["fainting", "fainted", "unconscious", "passed out"],
         "sprain": ["sprain", "twisted", "ankle", "wrist injury"],
     }
-    
+
     for topic, keywords in topics.items():
         if any(keyword in query_lower for keyword in keywords):
             return topic
-    
+
     return None
 
 
@@ -634,12 +620,12 @@ if __name__ == "__main__":
     print("Testing Gemini Client with NEW SDK...")
     print(f"LLM Model: {LLM_MODEL_ID}")
     print(f"Image Model: {IMAGE_MODEL_ID}")
-    
+
     # Test LLM
     response = invoke_llm("How do I perform CPR on an adult?")
     if response:
         print(f"\nLLM Response:\n{response[:500]}...")
-    
+
     # Test Image
     image = generate_image("A person performing chest compressions on an adult for CPR")
     if image:

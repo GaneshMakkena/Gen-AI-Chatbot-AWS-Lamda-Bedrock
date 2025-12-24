@@ -49,11 +49,11 @@ def get_s3_client():
     return _s3_client
 
 
-def upload_image_to_s3(image_bytes: bytes, step_number: str, query_hash: str) -> Optional[str]:
-    """Upload image bytes to S3 and return a presigned URL."""
+def upload_image_to_s3(image_bytes: bytes, step_number: str, query_hash: str) -> tuple[Optional[str], Optional[str]]:
+    """Upload image bytes to S3 and return (presigned_url, s3_key)."""
     if not IMAGES_BUCKET:
         logger.warning("IMAGES_BUCKET not configured")
-        return None
+        return None, None
     
     try:
         image_key = f"steps/{query_hash}/step_{step_number}_{uuid.uuid4().hex[:8]}.png"
@@ -62,21 +62,22 @@ def upload_image_to_s3(image_bytes: bytes, step_number: str, query_hash: str) ->
         s3.put_object(
             Bucket=IMAGES_BUCKET,
             Key=image_key,
-            Body=image_bytes,
-            ContentType='image/png'
+            ContentType='image/png',
+            Body=image_bytes
         )
         
+        # Generate URL valid for 7 days (max practical for S3)
         presigned_url = s3.generate_presigned_url(
             'get_object',
             Params={'Bucket': IMAGES_BUCKET, 'Key': image_key},
-            ExpiresIn=7200
+            ExpiresIn=604800  # 7 days
         )
-        logger.info("Uploaded image to S3", url=presigned_url[:60])
-        return presigned_url
+        logger.info("Uploaded image to S3", key=image_key)
+        return presigned_url, image_key
         
     except Exception as e:
         logger.error("Error uploading to S3", error=str(e))
-        return None
+        return None, None
 
 
 def clean_llm_response(response: str, keep_thinking: bool = False) -> str:
@@ -504,11 +505,12 @@ def process_single_step_image(step: Dict, query: str, query_hash: Optional[str] 
         image_url = None
         image_b64 = None
         image_failed = False
+        s3_key = None
         
         if image_bytes:
             image_b64 = base64.b64encode(image_bytes).decode('utf-8')
             if query_hash:
-                image_url = upload_image_to_s3(image_bytes, step_number, query_hash)
+                image_url, s3_key = upload_image_to_s3(image_bytes, step_number, query_hash)
         else:
             # Tier 1: Image generation returned None
             image_failed = True
@@ -521,6 +523,7 @@ def process_single_step_image(step: Dict, query: str, query_hash: Optional[str] 
             'image_prompt': image_prompt,
             'image': image_b64,
             'image_url': image_url,
+            's3_key': s3_key,  # Store key for URL regeneration
             'is_composite': False,
             'panel_index': None,
             'image_failed': image_failed,

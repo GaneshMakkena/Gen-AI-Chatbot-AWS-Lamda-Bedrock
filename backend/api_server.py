@@ -56,6 +56,21 @@ from health_profile import (
 from report_analyzer import (
     analyze_report, confirm_and_save_analysis, extract_facts_from_chat
 )
+# Phase 3: Security & Guest Tracking
+from guest_tracking import (
+    check_guest_limit, increment_guest_message, get_or_create_session
+)
+from audit_logging import (
+    log_event, log_chat_access, log_guest_event, log_security_event, AuditEvent
+)
+# Phase 4: Monitoring & LLM Safety
+from monitoring import (
+    record_chat_request, record_llm_call, record_image_generation,
+    record_security_event as record_security_metric, flush_metrics
+)
+from llm_safety import (
+    check_input_safety, check_output_safety, is_medical_query, SafetyLevel
+)
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -216,6 +231,44 @@ async def store_password(request: PasswordCheckRequest):
         return {"success": False, "error": str(e)}
 
 
+# ============================================
+# Phase 3: Guest Trial Endpoints
+# ============================================
+
+class GuestTrialStatus(BaseModel):
+    allowed: bool
+    remaining: int
+    message_count: int
+    limit: int
+
+
+@app.get("/guest/status")
+async def get_guest_trial_status(
+    x_forwarded_for: Optional[str] = Header(None),
+    user_agent: Optional[str] = Header(None),
+    x_fingerprint: Optional[str] = Header(None)
+):
+    """
+    Check guest trial status.
+    Returns remaining messages and whether guest can continue.
+    """
+    # Get client IP (X-Forwarded-For from ALB/CloudFront, or fallback)
+    ip_address = x_forwarded_for.split(",")[0].strip() if x_forwarded_for else "unknown"
+    
+    status = check_guest_limit(
+        ip_address=ip_address,
+        user_agent=user_agent or "",
+        fingerprint=x_fingerprint or ""
+    )
+    
+    return {
+        "allowed": status["allowed"],
+        "remaining": status["remaining"],
+        "message_count": status["message_count"],
+        "limit": status["limit"]
+    }
+
+
 @app.post("/chat", response_model=ChatResponse)
 @app.post("/v1/chat", response_model=ChatResponse)  # API versioning alias
 async def chat(request: ChatRequest, authorization: Optional[str] = Header(None)):
@@ -242,10 +295,71 @@ async def chat(request: ChatRequest, authorization: Optional[str] = Header(None)
     if not query:
         raise HTTPException(status_code=400, detail="Query cannot be empty")
     
+    # Phase 4: LLM Safety - Input validation (prompt injection detection)
+    input_safe, sanitized_query, fallback_response = check_input_safety(query)
+    if not input_safe:
+        logger.warning("Blocked potentially unsafe input", request_id=request_id)
+        record_security_metric("suspicious")
+        return ChatResponse(
+            answer=fallback_response or "I'm sorry, but I can't process that request.",
+            original_query=query,
+            detected_language="en",
+            topic=None,
+            step_images=None,
+            steps_count=0
+        )
+    query = sanitized_query  # Use sanitized query from here on
+    
     # Check if user is authenticated (optional)
     user_info = None
+    ip_address = "unknown"  # Will be populated for guest tracking
     if authorization:
         user_info = get_user_info(authorization)
+    
+    # Phase 3: Guest trial enforcement for unauthenticated users
+    if not user_info:
+        # Get client IP from headers (X-Forwarded-For from CloudFront/ALB)
+        # Note: In Lambda, we'd get this from the event, here we use headers
+        from fastapi import Request
+        ip_address = "unknown"  # Placeholder - in production, extract from request headers
+        
+        # Check guest limit
+        guest_status = check_guest_limit(ip_address=ip_address)
+        
+        if not guest_status["allowed"]:
+            # Log the blocked attempt
+            log_guest_event(
+                guest_id=guest_status["guest_id"],
+                ip_address=ip_address,
+                action="limit_reached"
+            )
+            logger.warning("Guest limit reached", guest_id=guest_status["guest_id"])
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "message": "Guest trial limit reached. Please sign up for unlimited access.",
+                    "limit": guest_status["limit"],
+                    "message_count": guest_status["message_count"]
+                }
+            )
+        
+        # Increment guest message count (before processing to prevent race conditions)
+        increment_result = increment_guest_message(
+            ip_address=ip_address,
+            query=query[:100]  # Store truncated query for debugging
+        )
+        
+        # Log guest chat event
+        log_guest_event(
+            guest_id=increment_result["guest_id"],
+            ip_address=ip_address,
+            action="chat",
+            details={"remaining": increment_result["remaining"]}
+        )
+        
+        logger.info("Guest chat", 
+                   guest_id=increment_result["guest_id"][:12],
+                   remaining=increment_result["remaining"])
     
     # Detect input language and translate to English if needed
     detected_lang = detect_language(query)

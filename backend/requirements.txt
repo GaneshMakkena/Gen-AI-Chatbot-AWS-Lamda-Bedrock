@@ -32,3 +32,10 @@ python-multipart==0.0.18
 # Observability
 aws-lambda-powertools==3.3.0
 httpx
+
+# Testing
+pytest==8.3.4
+pytest-cov==4.1.0
+pytest-asyncio==0.24.0
+moto[dynamodb,s3,cognitoidp]==5.0.26
+

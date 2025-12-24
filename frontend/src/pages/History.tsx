@@ -1,5 +1,5 @@
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import { useNavigate } from 'react-router-dom';
 import { getChatHistory, type ChatHistoryItem } from '../api/client';
@@ -19,15 +19,11 @@ export function History() {
         });
     }, []);
 
-    useEffect(() => {
+    const loadHistory = useCallback(async () => {
         if (!authToken) return;
-        loadHistory();
-    }, [authToken]);
-
-    const loadHistory = async () => {
         try {
             setLoading(true);
-            const data = await getChatHistory(authToken!);
+            const data = await getChatHistory(authToken);
             setHistory(data.items);
         } catch (err) {
             setError('Failed to load history');
@@ -35,7 +31,11 @@ export function History() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [authToken]);
+
+    useEffect(() => {
+        loadHistory();
+    }, [loadHistory]);
 
     if (loading) return <div style={{ padding: '2rem' }}>Loading history...</div>;
 

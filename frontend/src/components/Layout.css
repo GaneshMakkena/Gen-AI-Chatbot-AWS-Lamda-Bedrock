@@ -5,6 +5,7 @@
     width: 100vw;
     background-color: #f3f4f6;
     overflow: hidden;
+    /* Keep hidden here, scroll happens in main-content */
 }
 
 .sidebar {
@@ -150,8 +151,14 @@
 
 .main-content {
     flex: 1;
-    overflow: hidden;
+    overflow-y: auto;
+    /* Enable vertical scrolling */
+    overflow-x: hidden;
     position: relative;
+    height: 100%;
+    /* Ensure it fills available space */
+    padding-bottom: 2rem;
+    /* Space at bottom */
 }
 
 /* Mobile Sidebar */

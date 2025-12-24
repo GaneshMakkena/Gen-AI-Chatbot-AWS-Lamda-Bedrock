@@ -31,6 +31,50 @@ def get_table():
     return get_dynamodb().Table(CHAT_TABLE)
 
 
+# S3 client for URL regeneration
+_s3_client = None
+IMAGES_BUCKET = os.getenv("IMAGES_BUCKET", "")
+
+def _get_s3_client():
+    """Get or create S3 client."""
+    global _s3_client
+    if _s3_client is None:
+        _s3_client = boto3.client('s3', region_name=AWS_REGION)
+    return _s3_client
+
+
+def regenerate_image_urls(step_images: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Regenerate pre-signed URLs for step images from stored S3 keys.
+    This allows old chats to display images even after URLs expire.
+    """
+    if not step_images or not IMAGES_BUCKET:
+        return step_images
+    
+    s3 = _get_s3_client()
+    updated_images = []
+    
+    for img in step_images:
+        img_copy = dict(img)
+        s3_key = img.get('s3_key')
+        
+        if s3_key:
+            try:
+                # Regenerate presigned URL valid for 7 days
+                new_url = s3.generate_presigned_url(
+                    'get_object',
+                    Params={'Bucket': IMAGES_BUCKET, 'Key': s3_key},
+                    ExpiresIn=604800  # 7 days
+                )
+                img_copy['image_url'] = new_url
+            except Exception as e:
+                print(f"Error regenerating URL for {s3_key}: {e}")
+        
+        updated_images.append(img_copy)
+    
+    return updated_images
+
+
 def generate_chat_id() -> str:
     """Generate a unique chat ID."""
     return f"chat_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
@@ -99,7 +143,7 @@ def save_chat(
 
 
 def get_chat(user_id: str, chat_id: str) -> Optional[Dict[str, Any]]:
-    """Get a specific chat by ID."""
+    """Get a specific chat by ID with fresh image URLs."""
     try:
         table = get_table()
         response = table.get_item(
@@ -108,7 +152,13 @@ def get_chat(user_id: str, chat_id: str) -> Optional[Dict[str, Any]]:
                 "chat_id": chat_id
             }
         )
-        return response.get("Item")
+        chat = response.get("Item")
+        
+        if chat and chat.get("step_images"):
+            # Regenerate URLs for old images
+            chat["step_images"] = regenerate_image_urls(chat["step_images"])
+        
+        return chat
     except Exception as e:
         print(f"Error getting chat: {e}")
         return None
@@ -116,7 +166,7 @@ def get_chat(user_id: str, chat_id: str) -> Optional[Dict[str, Any]]:
 
 def get_user_chats(
     user_id: str,
-    limit: int = 50,
+    limit: int = 100,  # Increased from 50
     last_key: Optional[Dict] = None
 ) -> Dict[str, Any]:
     """

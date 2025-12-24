@@ -19,7 +19,6 @@ interface Message {
     content: string;
     response?: ChatResponse;
     timestamp: Date;
-    steps?: any[];
 }
 
 // Loading state messages that change over time
@@ -239,7 +238,8 @@ export function ChatInterface() {
             setMessages([]);
             chatState.reset();
         }
-    }, [chatId, authToken]); // Keep dependency on chatId to trigger on route change
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [chatId, authToken]); // Removed chatState to prevent infinite loop
 
     // Elapsed time ticker
     useEffect(() => {
@@ -252,7 +252,7 @@ export function ChatInterface() {
         return () => {
             if (interval) clearInterval(interval);
         };
-    }, [chatState.state, chatState.tick]);
+    }, [chatState]); // chatState is stable from useChatState hook
 
     // Auto-focus input on mount
     useEffect(() => {

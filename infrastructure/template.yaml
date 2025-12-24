@@ -53,6 +53,9 @@ Resources:
           REPORTS_BUCKET: !Ref ReportsBucket
           # Phase 2.5: Health Memory RAG
           HEALTH_PROFILE_TABLE: !Ref HealthProfileTable
+          # Phase 3: Security & Abuse Prevention
+          GUEST_TABLE: !Ref GuestSessionsTable
+          AUDIT_TABLE: !Ref AuditLogTable
       Policies:
         - Statement:
             - Effect: Allow
@@ -80,6 +83,25 @@ Resources:
                 - dynamodb:DeleteItem
               Resource:
                 - !GetAtt HealthProfileTable.Arn
+            # Phase 3: Guest Sessions permissions
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Scan
+              Resource:
+                - !GetAtt GuestSessionsTable.Arn
+            # Phase 3: Audit Log permissions
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource:
+                - !GetAtt AuditLogTable.Arn
+                - !Sub ${AuditLogTable.Arn}/index/*
             # Phase 2: Reports bucket permissions
             - Effect: Allow
               Action:
@@ -263,6 +285,131 @@ Resources:
           KeyType: HASH
       # No TTL - health data persists until user deletes
 
+  # ============================================
+  # Phase 3: Security & Abuse Prevention Tables
+  # ============================================
+
+  # DynamoDB Table for Guest Sessions (abuse prevention)
+  GuestSessionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub medibot-guest-sessions-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: guest_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: guest_id
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true  # Auto-cleanup expired guest sessions
+
+  # DynamoDB Table for Audit Logs (security & compliance)
+  AuditLogTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub medibot-audit-logs-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: event_id
+          AttributeType: S
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: N
+      KeySchema:
+        - AttributeName: event_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: user-id-index
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true  # 90-day retention via TTL
+
+  # ============================================
+  # Phase 4: Monitoring & Alerting
+  # ============================================
+
+  # CloudWatch Alarm: API 5xx Errors
+  ApiErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${AWS::StackName}-api-5xx-errors
+      AlarmDescription: Alert when API returns too many 5xx errors
+      Namespace: MediBot
+      MetricName: Api5xxErrors
+      Dimensions:
+        - Name: Environment
+          Value: !Ref Environment
+      Statistic: Sum
+      Period: 300  # 5 minutes
+      EvaluationPeriods: 2
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+  # CloudWatch Alarm: LLM Service Errors
+  LlmErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${AWS::StackName}-llm-errors
+      AlarmDescription: Alert when LLM service has too many errors
+      Namespace: MediBot
+      MetricName: LlmErrors
+      Dimensions:
+        - Name: Environment
+          Value: !Ref Environment
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+  # CloudWatch Alarm: Guest Rate Limit Hits
+  GuestLimitAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${AWS::StackName}-guest-limit-hits
+      AlarmDescription: Alert when many guests hit trial limit (potential abuse)
+      Namespace: MediBot
+      MetricName: GuestTrialLimitHit
+      Dimensions:
+        - Name: Environment
+          Value: !Ref Environment
+      Statistic: Sum
+      Period: 3600  # 1 hour
+      EvaluationPeriods: 1
+      Threshold: 50
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+  # CloudWatch Alarm: High Latency
+  HighLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${AWS::StackName}-high-latency
+      AlarmDescription: Alert when chat API latency is too high
+      Namespace: MediBot
+      MetricName: ChatLatencyMs
+      Dimensions:
+        - Name: Environment
+          Value: !Ref Environment
+      ExtendedStatistic: p95
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 30000  # 30 seconds
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
   # S3 Bucket for Medical Reports (private, encrypted)
   ReportsBucket:
     Type: AWS::S3::Bucket
@@ -411,3 +558,16 @@ Outputs:
     Value: !Ref HealthProfileTable
     Export:
       Name: !Sub ${AWS::StackName}-HealthProfileTable
+
+  # Phase 3 Outputs
+  GuestSessionsTableName:
+    Description: DynamoDB table for guest session tracking
+    Value: !Ref GuestSessionsTable
+    Export:
+      Name: !Sub ${AWS::StackName}-GuestSessionsTable
+
+  AuditLogTableName:
+    Description: DynamoDB table for audit logs
+    Value: !Ref AuditLogTable
+    Export:
+      Name: !Sub ${AWS::StackName}-AuditLogTable

@@ -109,15 +109,33 @@ export async function sendChatMessage(
 
 export { ApiError };
 // Profile Types
+export interface Condition {
+    name: string;
+    diagnosed_date?: string;
+    notes?: string;
+}
+
+export interface Medication {
+    name: string;
+    dosage: string;
+    frequency?: string;
+}
+
+export interface KeyFact {
+    fact: string;
+    source: string;
+    date?: string;
+}
+
 export interface HealthProfile {
     user_id: string;
-    conditions: any[];
-    medications: any[];
-    allergies: any[];
+    conditions: Condition[];
+    medications: Medication[];
+    allergies: string[];
     blood_type: string;
     age?: number;
     gender: string;
-    key_facts: any[];
+    key_facts: KeyFact[];
 }
 
 export interface ProfileUpdateRequest {
@@ -161,7 +179,7 @@ export async function getHealthProfile(token: string): Promise<HealthProfile> {
     return response.json();
 }
 
-export async function updateHealthProfile(token: string, data: ProfileUpdateRequest): Promise<any> {
+export async function updateHealthProfile(token: string, data: ProfileUpdateRequest): Promise<HealthProfile> {
     const response = await fetchWithTimeout(`${API_BASE_URL}/profile`, {
         method: 'PUT',
         headers: {

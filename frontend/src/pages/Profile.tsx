@@ -1,5 +1,5 @@
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import { getHealthProfile, updateHealthProfile } from '../api/client';
 import type { HealthProfile, ProfileUpdateRequest } from '../api/client';
@@ -25,32 +25,31 @@ export function Profile() {
         });
     }, []);
 
-    useEffect(() => {
+    const loadProfile = useCallback(async () => {
         if (!authToken) return;
-        loadProfile();
-    }, [authToken]);
-
-    const loadProfile = async () => {
         try {
             setLoading(true);
-            const data = await getHealthProfile(authToken!);
+            const data = await getHealthProfile(authToken);
             setProfile(data);
             // Initialize form state
-            setConditions(data.conditions.map(c => c.name || c));
-            setAllergies(data.allergies.map(a => a.name || a));
+            setConditions(data.conditions.map(c => c.name || String(c)));
+            setAllergies(data.allergies.map(a => String(a)));
             setMedications(data.medications.map(m => ({ name: m.name, dosage: m.dosage })));
             setBasicInfo({
                 age: data.age || 0,
                 gender: data.gender || '',
                 blood_type: data.blood_type || ''
             });
-        } catch (err) {
+        } catch {
             setError('Failed to load profile');
-            console.error(err);
         } finally {
             setLoading(false);
         }
-    };
+    }, [authToken]);
+
+    useEffect(() => {
+        loadProfile();
+    }, [loadProfile]);
 
     const handleSave = async () => {
         if (!authToken) return;
@@ -67,7 +66,7 @@ export function Profile() {
             await updateHealthProfile(authToken, updateData);
             setEditMode(false);
             loadProfile(); // Reload to get processed data
-        } catch (err) {
+        } catch {
             setError('Failed to update profile');
         }
     };

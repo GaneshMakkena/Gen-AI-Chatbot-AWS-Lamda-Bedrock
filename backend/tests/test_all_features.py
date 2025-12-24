@@ -23,7 +23,7 @@ class TestResult:
         self.passed = False
         self.message = ""
         self.duration = 0
-    
+
     def __str__(self):
         status = "✅ PASS" if self.passed else "❌ FAIL"
         return f"{status} | {self.name} ({self.duration:.2f}s) - {self.message}"
@@ -326,10 +326,10 @@ def test_lambda_has_reports_config():
 
 def run_all_tests():
     """Run all test scenarios."""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("MEDIBOT TEST SUITE - Phase 1 & Phase 2")
-    print("="*60)
-    
+    print("=" * 60)
+
     all_tests = [
         # Phase 1: Health
         ("Phase 1: Health Endpoint", [
@@ -380,10 +380,10 @@ def run_all_tests():
             test_lambda_has_reports_config,
         ]),
     ]
-    
+
     total_passed = 0
     total_failed = 0
-    
+
     for category, tests in all_tests:
         print(f"\n{category}")
         print("-" * 40)
@@ -394,11 +394,11 @@ def run_all_tests():
                 total_passed += 1
             else:
                 total_failed += 1
-    
-    print("\n" + "="*60)
+
+    print("\n" + "=" * 60)
     print(f"SUMMARY: {total_passed} passed, {total_failed} failed")
-    print("="*60)
-    
+    print("=" * 60)
+
     return total_passed, total_failed
 
 

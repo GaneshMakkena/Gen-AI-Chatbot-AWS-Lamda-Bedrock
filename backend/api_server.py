@@ -8,6 +8,7 @@ import base64
 import hashlib
 import uuid
 import time
+import boto3  # REQUIRED for s3 client
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.concurrency import run_in_threadpool
@@ -52,10 +53,17 @@ from chat_history import (  # noqa: E402
 # Phase 2.5: Health Memory RAG
 from health_profile import (  # noqa: E402
     get_context_summary,
-    extract_facts_from_chat  # Note: report_analyzer had extract_facts_from_chat, checking imports
+    get_or_create_profile,
+    add_condition,
+    add_medication,
+    add_allergy,
+    update_basic_info,
+    delete_health_profile,
+    remove_condition
 )
 from report_analyzer import (  # noqa: E402
-    extract_facts_from_chat
+    analyze_report,
+    confirm_and_save_analysis
 )
 
 # Phase 3: Security & Guest Tracking

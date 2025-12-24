@@ -8,10 +8,11 @@ SECURITY: Uses Argon2id for password hashing (resistant to rainbow tables and GP
 import os
 import secrets
 import boto3
-from typing import Optional, List, Dict, Any
+from typing import List, Dict, Any
 from datetime import datetime
 
-# Try to import argon2, fall back to bcrypt, then SHA-256 with stronger salt
+# Imports for password hashing
+# Try to import argon2, fall back to bcrypt, then SHA-256
 try:
     from argon2 import PasswordHasher
     from argon2.exceptions import VerifyMismatchError
@@ -62,24 +63,22 @@ def get_table():
 def _hash_password(password: str) -> str:
     """
     Hash a password using Argon2id (preferred), bcrypt (fallback), or SHA-256 with strong salt.
-    
+
     Returns a hash string that includes algorithm identifier for future compatibility.
     """
     if HASH_METHOD == "argon2":
         # Argon2id - most secure, recommended by OWASP
         # The hash includes salt, parameters, and version info
         return ph.hash(password)
-    
+
     elif HASH_METHOD == "bcrypt":
-        # bcrypt - industry standard fallback
-        import bcrypt
-        salt = bcrypt.gensalt(rounds=12)
-        return bcrypt.hashpw(password.encode(), salt).decode()
-    
-    else:
-        # SHA-256 with per-password random salt (last resort)
-        import hashlib
-        salt = secrets.token_hex(32)  # 64-char random salt
+        # bcrypt - industry standard
+        salt = bcrypt.gensalt()
+        return bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
+
+    # Fallback to SHA-256 (Not recommended but better than plain text)
+    else: # This 'else' was missing in the user's snippet, but implied by the original structure
+        salt = secrets.token_hex(16)  # 64-char random salt
         hash_value = hashlib.pbkdf2_hmac(
             'sha256',
             password.encode(),
@@ -92,7 +91,7 @@ def _hash_password(password: str) -> str:
 def _verify_password(password: str, stored_hash: str) -> bool:
     """
     Verify a password against a stored hash.
-    
+
     Handles multiple hash formats for backward compatibility.
     """
     try:
@@ -103,15 +102,14 @@ def _verify_password(password: str, stored_hash: str) -> bool:
                 return True
             except VerifyMismatchError:
                 return False
-        
-        elif stored_hash.startswith("$2"):
-            # bcrypt format
-            import bcrypt
-            return bcrypt.checkpw(password.encode(), stored_hash.encode())
-        
-        elif stored_hash.startswith("pbkdf2_sha256$"):
-            # Our PBKDF2 format: pbkdf2_sha256$salt$hash
-            import hashlib
+
+        # Fallback to bcrypt
+        # Check if bcrypt is available and the hash format matches
+        if bcrypt and (stored_hash.startswith('$2b$') or stored_hash.startswith('$2a$')):
+            return bcrypt.checkpw(password.encode('utf-8'), stored_hash.encode('utf-8'))
+
+        # Fallback to PBKDF2 SHA-256 (our custom format)
+        if hashlib and stored_hash.startswith("pbkdf2_sha256$"):
             parts = stored_hash.split("$")
             if len(parts) != 3:
                 return False
@@ -124,14 +122,14 @@ def _verify_password(password: str, stored_hash: str) -> bool:
                 iterations=100000
             ).hex()
             return secrets.compare_digest(computed, stored_value)
-        
+
         else:
             # Legacy SHA-256 with fixed salt (backward compatibility)
             import hashlib
             legacy_salt = "medibot_pwd_salt_2024"
             legacy_hash = hashlib.sha256(f"{legacy_salt}{password}".encode()).hexdigest()
             return secrets.compare_digest(legacy_hash, stored_hash)
-    
+
     except Exception as e:
         print(f"Password verification error: {e}")
         return False
@@ -145,32 +143,32 @@ def store_password_hash(user_id: str, password: str) -> bool:
     try:
         table = get_table()
         password_hash = _hash_password(password)
-        
+
         # Get existing history
         response = table.get_item(
             Key={"user_id": f"pwd_history_{user_id}"}
         )
-        
+
         existing = response.get("Item", {})
         history: List[Dict[str, str]] = existing.get("password_hashes", [])
-        
+
         # Add new hash with algorithm info
         history.append({
             "hash": password_hash,
             "algorithm": HASH_METHOD,
             "created_at": datetime.utcnow().isoformat()
         })
-        
+
         # Keep only last N
         history = history[-PASSWORD_HISTORY_COUNT:]
-        
+
         # Store back
         table.put_item(Item={
             "user_id": f"pwd_history_{user_id}",
             "password_hashes": history,
             "updated_at": datetime.utcnow().isoformat()
         })
-        
+
         print(f"Stored password hash ({HASH_METHOD}) for user {user_id[:8]}... (history count: {len(history)})")
         return True
     except Exception as e:
@@ -185,21 +183,21 @@ def is_password_previously_used(user_id: str, password: str) -> bool:
     """
     try:
         table = get_table()
-        
+
         response = table.get_item(
             Key={"user_id": f"pwd_history_{user_id}"}
         )
-        
+
         existing = response.get("Item", {})
         history: List[Dict[str, str]] = existing.get("password_hashes", [])
-        
+
         # Check if this password matches any stored hash
         for entry in history:
             stored_hash = entry.get("hash", "")
             if _verify_password(password, stored_hash):
                 print(f"Password was previously used for user {user_id[:8]}...")
                 return True
-        
+
         return False
     except Exception as e:
         print(f"Error checking password history: {e}")

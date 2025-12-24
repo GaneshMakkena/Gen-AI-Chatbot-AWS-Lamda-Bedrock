@@ -6,11 +6,12 @@ Events are stored in DynamoDB with TTL for automatic cleanup.
 """
 
 import os
-import time
-import uuid
 import boto3
-from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta
+import json
+import uuid
+from typing import Dict, Any, Optional
+from datetime import datetime
+from enum import Enum
 from functools import wraps
 
 # Environment variables
@@ -42,30 +43,30 @@ class AuditEvent:
     LOGIN_FAILED = "auth.login.failed"
     LOGOUT = "auth.logout"
     TOKEN_REFRESH = "auth.token.refresh"
-    
+
     # Data access events
     CHAT_CREATE = "chat.create"
     CHAT_READ = "chat.read"
     CHAT_DELETE = "chat.delete"
     HISTORY_LIST = "chat.history.list"
-    
+
     # Health profile events
     PROFILE_CREATE = "profile.create"
     PROFILE_READ = "profile.read"
     PROFILE_UPDATE = "profile.update"
     PROFILE_DELETE = "profile.delete"
-    
+
     # File events
     FILE_UPLOAD = "file.upload"
     FILE_ACCESS = "file.access"
     FILE_DELETE = "file.delete"
     REPORT_ANALYZE = "file.report.analyze"
-    
+
     # Security events
     RATE_LIMIT_HIT = "security.rate_limit"
     INVALID_TOKEN = "security.invalid_token"
     SUSPICIOUS_ACTIVITY = "security.suspicious"
-    
+
     # Guest events
     GUEST_CHAT = "guest.chat"
     GUEST_LIMIT_REACHED = "guest.limit_reached"
@@ -83,7 +84,7 @@ def log_event(
 ) -> Optional[str]:
     """
     Log an audit event to DynamoDB.
-    
+
     Args:
         event_type: Type of event (use AuditEvent constants)
         user_id: User's Cognito sub ID (or "guest" for unauthenticated)
@@ -93,16 +94,16 @@ def log_event(
         user_agent: Client user agent string
         details: Additional event-specific details
         severity: info, warning, error, critical
-        
+
     Returns:
         Event ID if logged successfully, None on error
     """
     now = datetime.utcnow()
     event_id = f"evt_{int(now.timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
-    
+
     # Calculate TTL based on retention policy
     ttl = int((now + timedelta(days=AUDIT_RETENTION_DAYS)).timestamp())
-    
+
     event = {
         "event_id": event_id,
         "timestamp": int(now.timestamp() * 1000),
@@ -117,14 +118,14 @@ def log_event(
         "created_at": now.isoformat(),
         "ttl": ttl
     }
-    
+
     try:
         table = get_table()
         table.put_item(Item=event)
-        
+
         # Log to CloudWatch as well for real-time monitoring
         print(f"AUDIT [{severity.upper()}] {event_type} user={user_id or 'anon'} resource={resource_id or 'none'}")
-        
+
         return event_id
     except Exception as e:
         print(f"Error logging audit event: {e}")
@@ -144,7 +145,7 @@ def log_chat_access(
         "delete": AuditEvent.CHAT_DELETE,
         "list": AuditEvent.HISTORY_LIST
     }.get(action, AuditEvent.CHAT_READ)
-    
+
     return log_event(
         event_type=event_type,
         user_id=user_id,
@@ -167,7 +168,7 @@ def log_profile_access(
         "update": AuditEvent.PROFILE_UPDATE,
         "delete": AuditEvent.PROFILE_DELETE
     }.get(action, AuditEvent.PROFILE_READ)
-    
+
     return log_event(
         event_type=event_type,
         user_id=user_id,
@@ -192,7 +193,7 @@ def log_file_event(
         "delete": AuditEvent.FILE_DELETE,
         "analyze": AuditEvent.REPORT_ANALYZE
     }.get(action, AuditEvent.FILE_ACCESS)
-    
+
     return log_event(
         event_type=event_type,
         user_id=user_id,
@@ -231,7 +232,7 @@ def log_guest_event(
         "chat": AuditEvent.GUEST_CHAT,
         "limit_reached": AuditEvent.GUEST_LIMIT_REACHED
     }.get(action, AuditEvent.GUEST_CHAT)
-    
+
     return log_event(
         event_type=event_type,
         user_id=f"guest:{guest_id}",
@@ -247,30 +248,30 @@ def get_user_audit_log(
 ) -> List[Dict[str, Any]]:
     """
     Get audit log entries for a specific user.
-    
+
     Note: This requires a GSI on user_id for efficient queries.
     For now, uses scan with filter (not recommended for production scale).
     """
     try:
         table = get_table()
-        
+
         filter_expr = "user_id = :uid"
         expr_values = {":uid": user_id}
-        
+
         if event_type:
             filter_expr += " AND begins_with(event_type, :etype)"
             expr_values[":etype"] = event_type
-        
+
         response = table.scan(
             FilterExpression=filter_expr,
             ExpressionAttributeValues=expr_values,
             Limit=limit
         )
-        
+
         # Sort by timestamp descending
         items = response.get("Items", [])
         items.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
-        
+
         return items[:limit]
     except Exception as e:
         print(f"Error getting user audit log: {e}")
@@ -281,7 +282,7 @@ def get_user_audit_log(
 def audit_logged(event_type: str, resource_type: str = ""):
     """
     Decorator to automatically log function calls to audit log.
-    
+
     Usage:
         @audit_logged(AuditEvent.PROFILE_READ, "health_profile")
         async def get_profile(request, authorization):
@@ -293,7 +294,7 @@ def audit_logged(event_type: str, resource_type: str = ""):
             # Try to extract user_id and resource_id from kwargs
             user_id = kwargs.get("user_id")
             resource_id = kwargs.get("resource_id") or kwargs.get("chat_id")
-            
+
             # Log the event
             log_event(
                 event_type=event_type,
@@ -301,7 +302,7 @@ def audit_logged(event_type: str, resource_type: str = ""):
                 resource_id=resource_id,
                 resource_type=resource_type
             )
-            
+
             return await func(*args, **kwargs)
         return wrapper
     return decorator

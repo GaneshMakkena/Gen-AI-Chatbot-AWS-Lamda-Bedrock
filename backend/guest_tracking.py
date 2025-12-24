@@ -38,38 +38,38 @@ def get_table():
 def generate_guest_id(ip_address: str, user_agent: str = "", fingerprint: str = "") -> str:
     """
     Generate a consistent guest ID from identifying information.
-    
+
     Uses a hash of IP + user agent + fingerprint to create a stable identifier
     that persists across sessions from the same device/browser.
     """
     # Combine identifiers
     identifier = f"{ip_address}:{user_agent}:{fingerprint}"
-    
+
     # Create SHA256 hash (first 16 chars for readability)
     hash_bytes = hashlib.sha256(identifier.encode()).hexdigest()[:16]
-    
+
     return f"guest_{hash_bytes}"
 
 
 def get_guest_session(guest_id: str) -> Optional[Dict[str, Any]]:
     """
     Get existing guest session from DynamoDB.
-    
+
     Returns None if session doesn't exist or has expired.
     """
     try:
         table = get_table()
         response = table.get_item(Key={"guest_id": guest_id})
-        
+
         item = response.get("Item")
         if not item:
             return None
-        
+
         # Check if session has expired (TTL might not have cleaned it up yet)
         ttl = item.get("ttl", 0)
         if ttl and ttl < int(time.time()):
             return None
-        
+
         return item
     except Exception as e:
         print(f"Error getting guest session: {e}")
@@ -87,7 +87,7 @@ def create_guest_session(
     """
     now = datetime.utcnow()
     ttl = int((now + timedelta(hours=GUEST_SESSION_TTL_HOURS)).timestamp())
-    
+
     session = {
         "guest_id": guest_id,
         "ip_address": ip_address,
@@ -99,7 +99,7 @@ def create_guest_session(
         "last_activity": now.isoformat(),
         "ttl": ttl
     }
-    
+
     try:
         table = get_table()
         table.put_item(Item=session)
@@ -119,11 +119,11 @@ def get_or_create_session(
     Get existing session or create a new one.
     """
     guest_id = generate_guest_id(ip_address, user_agent, fingerprint)
-    
+
     session = get_guest_session(guest_id)
     if session:
         return session
-    
+
     return create_guest_session(guest_id, ip_address, user_agent, fingerprint)
 
 
@@ -134,7 +134,7 @@ def check_guest_limit(
 ) -> Dict[str, Any]:
     """
     Check if guest has exceeded their message limit.
-    
+
     Returns:
         {
             "allowed": bool,
@@ -145,11 +145,11 @@ def check_guest_limit(
         }
     """
     session = get_or_create_session(ip_address, user_agent, fingerprint)
-    
+
     message_count = session.get("message_count", 0)
     remaining = max(0, GUEST_MESSAGE_LIMIT - message_count)
     allowed = message_count < GUEST_MESSAGE_LIMIT
-    
+
     return {
         "allowed": allowed,
         "remaining": remaining,
@@ -167,18 +167,18 @@ def increment_guest_message(
 ) -> Dict[str, Any]:
     """
     Increment guest message count and record the message.
-    
+
     Returns updated limit status.
     """
     guest_id = generate_guest_id(ip_address, user_agent, fingerprint)
     now = datetime.utcnow()
-    
+
     # Ensure session exists
     get_or_create_session(ip_address, user_agent, fingerprint)
-    
+
     try:
         table = get_table()
-        
+
         # Atomically increment counter and add message
         response = table.update_item(
             Key={"guest_id": guest_id},
@@ -199,12 +199,12 @@ def increment_guest_message(
             },
             ReturnValues="ALL_NEW"
         )
-        
+
         new_count = response["Attributes"].get("message_count", 0)
         remaining = max(0, GUEST_MESSAGE_LIMIT - new_count)
-        
+
         print(f"Guest {guest_id} message #{new_count} (remaining: {remaining})")
-        
+
         return {
             "allowed": new_count <= GUEST_MESSAGE_LIMIT,
             "remaining": remaining,
@@ -247,7 +247,7 @@ def get_guest_stats() -> Dict[str, Any]:
         response = table.scan(
             Select='COUNT'
         )
-        
+
         return {
             "total_sessions": response.get("Count", 0),
             "scanned_count": response.get("ScannedCount", 0)

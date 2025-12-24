@@ -11,15 +11,15 @@ from api_server import app
 def generate_openapi(output_file: str):
     """Generate OpenAPI schema and save to file."""
     openapi_schema = app.openapi()
-    
+
     with open(output_file, 'w') as f:
         json.dump(openapi_schema, f, indent=2)
-    
+
     print(f"OpenAPI schema generated at: {output_file}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate OpenAPI schema for MediBot API")
     parser.add_argument("--output", default="openapi.json", help="Output file path (default: openapi.json)")
-    
+
     args = parser.parse_args()
     generate_openapi(args.output)

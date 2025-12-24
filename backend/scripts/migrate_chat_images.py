@@ -109,7 +109,7 @@ def scan_and_fix_chats(dry_run: bool = True, limit: Optional[int] = None):
     Scan all chats and fix missing s3_keys.
     """
     print(f"\n{'='*60}")
-    print(f"Chat Image Migration Script")
+    print("Chat Image Migration Script")
     print(f"{'='*60}")
     print(f"Table: {CHAT_TABLE}")
     print(f"Region: {AWS_REGION}")

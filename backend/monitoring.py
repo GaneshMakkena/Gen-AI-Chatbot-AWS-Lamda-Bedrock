@@ -7,7 +7,7 @@ Uses aws-lambda-powertools for structured metric publishing.
 
 import os
 import time
-from typing import Optional, Dict, Any
+from typing import Optional, Dict
 from functools import wraps
 from contextlib import contextmanager
 
@@ -57,37 +57,37 @@ class MetricName:
     API_ERRORS = "ApiErrors"
     API_4XX_ERRORS = "Api4xxErrors"
     API_5XX_ERRORS = "Api5xxErrors"
-    
+
     # Chat Metrics
     CHAT_REQUESTS = "ChatRequests"
     CHAT_LATENCY = "ChatLatencyMs"
     CHAT_WITH_IMAGES = "ChatWithImages"
     CHAT_GUEST = "GuestChatRequests"
     CHAT_AUTHENTICATED = "AuthenticatedChatRequests"
-    
+
     # LLM Metrics
     LLM_REQUESTS = "LlmRequests"
     LLM_LATENCY = "LlmLatencyMs"
     LLM_ERRORS = "LlmErrors"
     LLM_TOKEN_INPUT = "LlmInputTokens"
     LLM_TOKEN_OUTPUT = "LlmOutputTokens"
-    
+
     # Image Generation Metrics
     IMAGE_REQUESTS = "ImageGenRequests"
     IMAGE_LATENCY = "ImageGenLatencyMs"
     IMAGE_ERRORS = "ImageGenErrors"
     IMAGE_FALLBACKS = "ImageFallbacks"
-    
+
     # User Metrics
     ACTIVE_USERS = "ActiveUsers"
     NEW_SIGNUPS = "NewSignups"
     GUEST_TRIAL_LIMIT = "GuestTrialLimitHit"
-    
+
     # Health Profile Metrics
     PROFILE_READS = "ProfileReads"
     PROFILE_UPDATES = "ProfileUpdates"
     REPORT_ANALYSES = "ReportAnalyses"
-    
+
     # Security Metrics
     AUTH_FAILURES = "AuthFailures"
     RATE_LIMIT_HITS = "RateLimitHits"
@@ -106,7 +106,7 @@ def publish_metric(
 ):
     """
     Publish a single metric to CloudWatch.
-    
+
     Uses powertools if available, otherwise manual boto3 call.
     """
     # Add standard dimensions
@@ -116,7 +116,7 @@ def publish_metric(
     }
     if dimensions:
         all_dimensions.update(dimensions)
-    
+
     if POWERTOOLS_AVAILABLE and metrics:
         # Use powertools
         pt_unit = getattr(MetricUnit, unit, MetricUnit.Count)
@@ -168,7 +168,7 @@ def publish_error(name: str, error_type: str = "unknown", dimensions: Optional[D
 def measure_latency(metric_name: str, dimensions: Optional[Dict[str, str]] = None):
     """
     Context manager to measure and publish latency.
-    
+
     Usage:
         with measure_latency(MetricName.LLM_LATENCY):
             response = call_llm()
@@ -184,7 +184,7 @@ def measure_latency(metric_name: str, dimensions: Optional[Dict[str, str]] = Non
 def timed_metric(metric_name: str, error_metric: Optional[str] = None):
     """
     Decorator to measure function latency and publish metrics.
-    
+
     Usage:
         @timed_metric(MetricName.LLM_LATENCY, MetricName.LLM_ERRORS)
         def call_llm():
@@ -223,17 +223,17 @@ def record_chat_request(
         "Language": language,
         "HasImages": str(has_images).lower()
     }
-    
+
     publish_count(MetricName.CHAT_REQUESTS, 1, dims)
-    
+
     if is_authenticated:
         publish_count(MetricName.CHAT_AUTHENTICATED)
     else:
         publish_count(MetricName.CHAT_GUEST)
-    
+
     if has_images:
         publish_count(MetricName.CHAT_WITH_IMAGES)
-    
+
     if latency_ms:
         publish_latency(MetricName.CHAT_LATENCY, latency_ms, dims)
 
@@ -247,15 +247,15 @@ def record_llm_call(
 ):
     """Record an LLM API call."""
     dims = {"Model": model}
-    
+
     publish_count(MetricName.LLM_REQUESTS, 1, dims)
     publish_latency(MetricName.LLM_LATENCY, latency_ms, dims)
-    
+
     if input_tokens > 0:
         publish_metric(MetricName.LLM_TOKEN_INPUT, input_tokens, "Count", dims)
     if output_tokens > 0:
         publish_metric(MetricName.LLM_TOKEN_OUTPUT, output_tokens, "Count", dims)
-    
+
     if not success:
         publish_count(MetricName.LLM_ERRORS, 1, dims)
 
@@ -269,10 +269,10 @@ def record_image_generation(
     """Record image generation metrics."""
     publish_count(MetricName.IMAGE_REQUESTS, step_count)
     publish_latency(MetricName.IMAGE_LATENCY, latency_ms)
-    
+
     if fallback_count > 0:
         publish_count(MetricName.IMAGE_FALLBACKS, fallback_count)
-    
+
     if not success:
         publish_count(MetricName.IMAGE_ERRORS)
 
@@ -280,7 +280,7 @@ def record_image_generation(
 def record_security_event(event_type: str, ip_address: Optional[str] = None):
     """Record a security-related metric."""
     dims = {"EventType": event_type}
-    
+
     if event_type == "auth_failure":
         publish_count(MetricName.AUTH_FAILURES, 1, dims)
     elif event_type == "rate_limit":

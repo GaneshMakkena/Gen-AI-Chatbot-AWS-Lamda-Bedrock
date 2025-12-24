@@ -10,8 +10,7 @@ Key Features:
 """
 
 import re
-import os
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, List
 from dataclasses import dataclass
 from enum import Enum
 
@@ -49,27 +48,27 @@ INJECTION_PATTERNS = [
     r"forget\s+(everything|your|previous)\s+(instructions?|training)?",
     r"override\s+(your|the)\s+(system|instructions?)",
     r"new\s+(instructions?|rules?)\s*:",
-    
+
     # Role manipulation
     r"you\s+are\s+now\s+a?\s*(different|new|evil|unrestricted)",
     r"pretend\s+you\s+are\s+(?!a\s+doctor|a\s+nurse|a\s+medical)",
     r"act\s+as\s+(?!a\s+medical|a\s+health|a\s+doctor)",
     r"roleplay\s+as\s+(?!a\s+medical|a\s+healthcare)",
     r"switch\s+to\s+(dan|developer|unrestricted)\s+mode",
-    
+
     # Data extraction attempts
     r"reveal\s+(your|the)\s+(system|hidden|secret)\s+(prompt|instructions?)",
     r"show\s+(me\s+)?(your|the)\s+(system|hidden)\s+(prompt|config)",
     r"what\s+is\s+(your|the)\s+(system|initial)\s+(prompt|instructions?)",
     r"print\s+(your|the)\s+(system|hidden)\s+(prompt|config)",
     r"output\s+(your|the)\s+(system|internal)\s+(prompt|state)",
-    
+
     # Jailbreak attempts
     r"(dai|dan|dev|developer)\s*mode",
     r"bypass\s+(your|the|any)\s+(restrictions?|filters?|safety)",
     r"disable\s+(your|the)\s+(safety|content|moderation)",
     r"remove\s+(all\s+)?(restrictions?|filters?|limits?)",
-    
+
     # Markdown/format injection
     r"\[system\]",
     r"\[assistant\]",
@@ -80,7 +79,7 @@ INJECTION_PATTERNS = [
 
 # Compile patterns for efficiency
 COMPILED_INJECTION_PATTERNS = [
-    re.compile(pattern, re.IGNORECASE) 
+    re.compile(pattern, re.IGNORECASE)
     for pattern in INJECTION_PATTERNS
 ]
 
@@ -88,28 +87,28 @@ COMPILED_INJECTION_PATTERNS = [
 def detect_prompt_injection(text: str) -> SafetyCheckResult:
     """
     Detect potential prompt injection attempts in user input.
-    
+
     Returns:
         SafetyCheckResult with detection details
     """
     issues = []
-    
+
     for pattern in COMPILED_INJECTION_PATTERNS:
         matches = pattern.findall(text)
         if matches:
             issues.append(f"Pattern detected: {pattern.pattern[:50]}...")
-    
+
     # Check for excessive special characters/delimiters
     if text.count('```') > 4:
         issues.append("Excessive code block delimiters")
-    
+
     if text.count('[') > 10 or text.count(']') > 10:
         issues.append("Excessive bracket usage")
-    
+
     # Check for suspiciously long inputs
     if len(text) > 10000:
         issues.append("Input exceeds maximum length")
-    
+
     # Determine safety level
     if len(issues) >= 2:
         return SafetyCheckResult(
@@ -144,17 +143,17 @@ DANGEROUS_ADVICE_PATTERNS = [
     r"increase\s+dosage\s+significantly",
     r"stop\s+taking\s+(all\s+)?your\s+medications?\s+(immediately|at\s+once)",
     r"stop\s+your\s+(insulin|heart\s+medication|blood\s+thinner)",
-    
+
     # Dangerous substance recommendations
     r"drink\s+(bleach|hydrogen\s+peroxide|chlorine)",
     r"inject\s+(bleach|disinfectant)",
     r"consume\s+(cleaning\s+products?|poison)",
-    
+
     # Avoiding medical care
     r"don't\s+(need\s+to\s+)?see\s+a\s+doctor",
     r"avoid\s+(hospitals?|doctors?|medical\s+care)",
     r"(cancer|tumor|diabetes|heart\s+disease)\s+can\s+be\s+cured\s+(with|by)\s+(diet|herbs?|supplements?)",
-    
+
     # False cure claims
     r"(cure|heal)\s+(cancer|aids|hiv|diabetes)\s+(naturally|with\s+herbs?)",
     r"guaranteed\s+to\s+(cure|heal|treat)",
@@ -170,17 +169,17 @@ COMPILED_DANGEROUS_PATTERNS = [
 def validate_output(response: str) -> SafetyCheckResult:
     """
     Validate LLM output for dangerous or inappropriate content.
-    
+
     Returns:
         SafetyCheckResult with validation details
     """
     issues = []
-    
+
     # Check for dangerous advice patterns
     for pattern in COMPILED_DANGEROUS_PATTERNS:
         if pattern.search(response):
             issues.append(f"Dangerous advice pattern: {pattern.pattern[:40]}...")
-    
+
     # Check for missing disclaimer indicators
     disclaimer_phrases = [
         "consult a doctor",
@@ -190,16 +189,16 @@ def validate_output(response: str) -> SafetyCheckResult:
         "see a healthcare",
         "medical professional"
     ]
-    
+
     has_disclaimer = any(
-        phrase.lower() in response.lower() 
+        phrase.lower() in response.lower()
         for phrase in disclaimer_phrases
     )
-    
+
     # For longer responses, check if disclaimer is present
     if len(response) > 500 and not has_disclaimer:
         issues.append("Missing medical disclaimer")
-    
+
     # Determine safety level
     if len(issues) >= 1 and any("Dangerous" in i for i in issues):
         return SafetyCheckResult(
@@ -232,20 +231,20 @@ def sanitize_input(text: str) -> str:
     Removes or escapes potentially dangerous patterns.
     """
     sanitized = text
-    
+
     # Remove system-like markers
     sanitized = re.sub(r'\[system\]', '', sanitized, flags=re.IGNORECASE)
     sanitized = re.sub(r'\[assistant\]', '', sanitized, flags=re.IGNORECASE)
     sanitized = re.sub(r'<system>', '', sanitized, flags=re.IGNORECASE)
     sanitized = re.sub(r'</system>', '', sanitized, flags=re.IGNORECASE)
-    
+
     # Limit excessive code blocks
     sanitized = re.sub(r'```{3,}', '```', sanitized)
-    
+
     # Trim excessive length
     if len(sanitized) > 8000:
         sanitized = sanitized[:8000] + "..."
-    
+
     return sanitized.strip()
 
 
@@ -254,11 +253,11 @@ def sanitize_output(response: str) -> str:
     Sanitize LLM output before returning to user.
     """
     sanitized = response
-    
+
     # Remove any leaked system prompts
     sanitized = re.sub(r'<\|.*?\|>', '', sanitized)
     sanitized = re.sub(r'\[SYSTEM\].*?\[/SYSTEM\]', '', sanitized, flags=re.DOTALL)
-    
+
     return sanitized.strip()
 
 
@@ -268,27 +267,27 @@ def sanitize_output(response: str) -> str:
 
 FALLBACK_RESPONSES = {
     "safety": """
-I apologize, but I'm unable to provide a response to that query. 
+I apologize, but I'm unable to provide a response to that query.
 
 For your safety, please consult a qualified healthcare professional for medical advice.
 
 **If this is an emergency, please call emergency services immediately.**
 """.strip(),
-    
+
     "injection": """
-I'm sorry, but I detected something unusual in your request. 
+I'm sorry, but I detected something unusual in your request.
 
 Could you please rephrase your medical question? I'm here to help with health-related queries.
 """.strip(),
-    
+
     "error": """
-I apologize, but I encountered an issue processing your request. 
+I apologize, but I encountered an issue processing your request.
 
 Please try again, or rephrase your question. If the problem persists, the system may be experiencing temporary issues.
 
 **For urgent medical concerns, please contact a healthcare provider directly.**
 """.strip(),
-    
+
     "ambiguous": """
 I'd like to help, but I need more information to provide useful guidance.
 
@@ -314,38 +313,38 @@ def get_fallback_response(reason: str = "error") -> str:
 def check_input_safety(user_input: str) -> Tuple[bool, str, Optional[str]]:
     """
     Perform comprehensive input safety check.
-    
+
     Returns:
         Tuple of (is_safe, sanitized_input, fallback_response_if_blocked)
     """
     # Sanitize first
     sanitized = sanitize_input(user_input)
-    
+
     # Check for injection
     injection_result = detect_prompt_injection(sanitized)
-    
+
     if injection_result.level == SafetyLevel.BLOCKED:
         return False, sanitized, injection_result.fallback_response
-    
+
     return True, sanitized, None
 
 
 def check_output_safety(llm_response: str) -> Tuple[bool, str, Optional[str]]:
     """
     Perform comprehensive output safety check.
-    
+
     Returns:
         Tuple of (is_safe, sanitized_output, fallback_response_if_blocked)
     """
     # Validate output
     validation_result = validate_output(llm_response)
-    
+
     if validation_result.level == SafetyLevel.BLOCKED:
         return False, "", validation_result.fallback_response
-    
+
     # Sanitize output
     sanitized = sanitize_output(llm_response)
-    
+
     return True, sanitized, None
 
 
@@ -367,6 +366,6 @@ def is_medical_query(query: str) -> bool:
         "depression", "blood", "heart", "lung", "kidney", "liver",
         "cancer", "diabetes", "allergy", "vaccine", "immunization"
     ]
-    
+
     query_lower = query.lower()
     return any(keyword in query_lower for keyword in medical_keywords)

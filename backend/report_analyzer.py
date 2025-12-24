@@ -6,7 +6,6 @@ and extract health information for the user's profile.
 
 import os
 import json
-import base64
 import boto3
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
@@ -88,13 +87,13 @@ If the document is not a medical document or is unreadable, return:
 def get_report_from_s3(file_key: str) -> Optional[bytes]:
     """
     Fetch a report file from S3.
-    
+
     Returns file bytes or None if failed.
     """
     if not REPORTS_BUCKET:
         print("REPORTS_BUCKET not configured")
         return None
-    
+
     try:
         response = s3_client.get_object(Bucket=REPORTS_BUCKET, Key=file_key)
         return response["Body"].read()
@@ -106,11 +105,11 @@ def get_report_from_s3(file_key: str) -> Optional[bytes]:
 def analyze_report(file_key: str, user_id: str) -> Dict[str, Any]:
     """
     Analyze a medical report using Gemini multimodal.
-    
+
     Args:
         file_key: S3 key of the uploaded report
         user_id: User ID for updating their health profile
-    
+
     Returns:
         Dict with analysis results and status
     """
@@ -121,20 +120,20 @@ def analyze_report(file_key: str, user_id: str) -> Dict[str, Any]:
             "success": False,
             "error": "Failed to fetch report from storage"
         }
-    
+
     # Determine file type from key
     file_ext = file_key.split(".")[-1].lower()
-    
+
     try:
         # Use new google-genai SDK
         from google.genai import types
         client = get_client()
-        
+
         if file_ext in ["jpg", "jpeg", "png", "webp"]:
             # Image analysis
             mime_type = f"image/{'jpeg' if file_ext in ['jpg', 'jpeg'] else file_ext}"
             image_part = types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
-            
+
             response = client.models.generate_content(
                 model="gemini-2.0-flash-exp",
                 contents=[EXTRACTION_PROMPT, image_part]
@@ -142,7 +141,7 @@ def analyze_report(file_key: str, user_id: str) -> Dict[str, Any]:
         elif file_ext == "pdf":
             # PDF analysis
             pdf_part = types.Part.from_bytes(data=file_bytes, mime_type="application/pdf")
-            
+
             response = client.models.generate_content(
                 model="gemini-2.0-flash-exp",
                 contents=[EXTRACTION_PROMPT, pdf_part]
@@ -152,10 +151,10 @@ def analyze_report(file_key: str, user_id: str) -> Dict[str, Any]:
                 "success": False,
                 "error": f"Unsupported file type: {file_ext}"
             }
-        
+
         # Parse response
         response_text = response.text
-        
+
         # Extract JSON from response (handle markdown code blocks)
         if "```json" in response_text:
             json_start = response_text.find("```json") + 7
@@ -165,16 +164,16 @@ def analyze_report(file_key: str, user_id: str) -> Dict[str, Any]:
             json_start = response_text.find("```") + 3
             json_end = response_text.find("```", json_start)
             response_text = response_text[json_start:json_end].strip()
-        
+
         extracted = json.loads(response_text)
-        
+
         # Check for error response
         if "error" in extracted:
             return {
                 "success": False,
                 "error": extracted["error"]
             }
-        
+
         # Parse into ExtractedHealthInfo
         health_info = ExtractedHealthInfo(
             conditions=extracted.get("conditions", []),
@@ -187,7 +186,7 @@ def analyze_report(file_key: str, user_id: str) -> Dict[str, Any]:
             summary=extracted.get("summary", ""),
             report_type=extracted.get("report_type", "general")
         )
-        
+
         # Return for user confirmation (don't auto-update profile)
         return {
             "success": True,
@@ -205,7 +204,7 @@ def analyze_report(file_key: str, user_id: str) -> Dict[str, Any]:
             "file_key": file_key,
             "user_id": user_id
         }
-        
+
     except json.JSONDecodeError as e:
         print(f"JSON parse error: {e}")
         print(f"Response was: {response_text[:500]}")
@@ -228,7 +227,7 @@ def confirm_and_save_analysis(
 ) -> Dict[str, Any]:
     """
     Save confirmed analysis results to user's health profile.
-    
+
     Called after user confirms the extracted information.
     """
     saved_items = {
@@ -238,13 +237,13 @@ def confirm_and_save_analysis(
         "key_facts": [],
         "basic_info": False
     }
-    
+
     try:
         # Add conditions
         for condition in extracted.get("conditions", []):
             if add_condition(user_id, condition, source="report"):
                 saved_items["conditions"].append(condition)
-        
+
         # Add medications
         for med in extracted.get("medications", []):
             if isinstance(med, dict):
@@ -255,17 +254,17 @@ def confirm_and_save_analysis(
                 dosage = ""
             if name and add_medication(user_id, name, dosage, source="report"):
                 saved_items["medications"].append(name)
-        
+
         # Add allergies
         for allergy in extracted.get("allergies", []):
             if add_allergy(user_id, allergy, source="report"):
                 saved_items["allergies"].append(allergy)
-        
+
         # Add key facts
         for fact in extracted.get("key_facts", []):
             if add_key_fact(user_id, fact, source="report"):
                 saved_items["key_facts"].append(fact)
-        
+
         # Update basic info
         age = extracted.get("age")
         gender = extracted.get("gender")
@@ -273,18 +272,18 @@ def confirm_and_save_analysis(
         if any([age, gender, blood_type]):
             update_basic_info(user_id, age=age, gender=gender, blood_type=blood_type)
             saved_items["basic_info"] = True
-        
+
         # Save report summary
         summary = extracted.get("summary", "Medical report analyzed")
         report_type = extracted.get("report_type", "general")
         add_report_summary(user_id, summary, report_type, file_key)
-        
+
         return {
             "success": True,
             "saved": saved_items,
             "message": "Health profile updated successfully"
         }
-        
+
     except Exception as e:
         print(f"Error saving analysis: {e}")
         return {
@@ -300,13 +299,13 @@ def extract_facts_from_chat(
 ) -> List[str]:
     """
     Extract health facts from a chat conversation.
-    
+
     This runs after each chat to capture any health information
     the user mentions (e.g., "I have diabetes").
     """
     if not user_message or len(user_message) < 10:
         return []
-    
+
     extraction_prompt = f"""
 Analyze this conversation and extract any NEW health facts about the user.
 
@@ -333,16 +332,16 @@ IMPORTANT: Only include facts EXPLICITLY stated by the user.
 If no health facts are mentioned, return empty lists.
 Do NOT infer or guess - only extract what the user directly said.
 """
-    
+
     try:
         client = get_client()
         response = client.models.generate_content(
             model="gemini-2.0-flash-exp",
             contents=extraction_prompt
         )
-        
+
         response_text = response.text
-        
+
         # Extract JSON
         if "```json" in response_text:
             json_start = response_text.find("```json") + 7
@@ -352,38 +351,38 @@ Do NOT infer or guess - only extract what the user directly said.
             json_start = response_text.find("```") + 3
             json_end = response_text.find("```", json_start)
             response_text = response_text[json_start:json_end].strip()
-        
+
         extracted = json.loads(response_text)
-        
+
         saved = []
-        
+
         # Save extracted info (silently, in background)
         for condition in extracted.get("conditions", []):
             if condition and add_condition(user_id, condition, source="chat"):
                 saved.append(f"Noted: {condition}")
-        
+
         for med in extracted.get("medications", []):
             name = med.get("name", "") if isinstance(med, dict) else med
             dosage = med.get("dosage", "") if isinstance(med, dict) else ""
             if name and add_medication(user_id, name, dosage, source="chat"):
                 saved.append(f"Noted medication: {name}")
-        
+
         for allergy in extracted.get("allergies", []):
             if allergy and add_allergy(user_id, allergy, source="chat"):
                 saved.append(f"Noted allergy: {allergy}")
-        
+
         for fact in extracted.get("key_facts", []):
             if fact and add_key_fact(user_id, fact, source="chat"):
                 saved.append(f"Noted: {fact}")
-        
+
         # Update basic info
         age = extracted.get("age")
         gender = extracted.get("gender")
         if age or gender:
             update_basic_info(user_id, age=age, gender=gender)
-        
+
         return saved
-        
+
     except Exception as e:
         print(f"Error extracting facts from chat: {e}")
         return []

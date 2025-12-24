@@ -50,14 +50,14 @@ def regenerate_image_urls(step_images: List[Dict[str, Any]]) -> List[Dict[str, A
     """
     if not step_images or not IMAGES_BUCKET:
         return step_images
-    
+
     s3 = _get_s3_client()
     updated_images = []
-    
+
     for img in step_images:
         img_copy = dict(img)
         s3_key = img.get('s3_key')
-        
+
         if s3_key:
             try:
                 # Regenerate presigned URL valid for 7 days
@@ -69,9 +69,9 @@ def regenerate_image_urls(step_images: List[Dict[str, Any]]) -> List[Dict[str, A
                 img_copy['image_url'] = new_url
             except Exception as e:
                 print(f"Error regenerating URL for {s3_key}: {e}")
-        
+
         updated_images.append(img_copy)
-    
+
     return updated_images
 
 
@@ -93,7 +93,7 @@ def save_chat(
 ) -> Dict[str, Any]:
     """
     Save a chat message to DynamoDB.
-    
+
     Args:
         user_id: The user's Cognito sub ID
         query: User's question
@@ -104,18 +104,18 @@ def save_chat(
         chat_id: Optional existing chat ID (for multi-turn)
         step_images: Full step image objects with titles/descriptions
         attachments: User-attached files metadata
-        
+
     Returns:
         The saved chat item
     """
     if not chat_id:
         chat_id = generate_chat_id()
-    
+
     timestamp = int(time.time() * 1000)
-    
+
     # Calculate TTL (90 days from now)
     ttl = int(time.time()) + (90 * 24 * 60 * 60)
-    
+
     item = {
         "user_id": user_id,
         "chat_id": chat_id,
@@ -131,7 +131,7 @@ def save_chat(
         "step_images": step_images or [],
         "attachments": attachments or []
     }
-    
+
     try:
         table = get_table()
         table.put_item(Item=item)
@@ -153,11 +153,11 @@ def get_chat(user_id: str, chat_id: str) -> Optional[Dict[str, Any]]:
             }
         )
         chat = response.get("Item")
-        
+
         if chat and chat.get("step_images"):
             # Regenerate URLs for old images
             chat["step_images"] = regenerate_image_urls(chat["step_images"])
-        
+
         return chat
     except Exception as e:
         print(f"Error getting chat: {e}")
@@ -171,18 +171,18 @@ def get_user_chats(
 ) -> Dict[str, Any]:
     """
     Get all chats for a user, sorted by timestamp (newest first).
-    
+
     Args:
         user_id: The user's Cognito sub ID
         limit: Maximum number of chats to return
         last_key: Pagination key for next page
-        
+
     Returns:
         Dict with "items" and optional "last_key" for pagination
     """
     try:
         table = get_table()
-        
+
         query_params = {
             "KeyConditionExpression": "user_id = :uid",
             "ExpressionAttributeValues": {
@@ -191,22 +191,22 @@ def get_user_chats(
             "ScanIndexForward": False,  # Newest first
             "Limit": limit
         }
-        
+
         if last_key:
             query_params["ExclusiveStartKey"] = last_key
-        
+
         response = table.query(**query_params)
-        
+
         result = {
             "items": response.get("Items", []),
             "count": response.get("Count", 0)
         }
-        
+
         if "LastEvaluatedKey" in response:
             result["last_key"] = response["LastEvaluatedKey"]
-        
+
         return result
-        
+
     except Exception as e:
         print(f"Error getting user chats: {e}")
         return {"items": [], "count": 0}
@@ -222,19 +222,19 @@ def delete_chat(user_id: str, chat_id: str) -> bool:
     """Delete a specific chat and its associated S3 images."""
     try:
         table = get_table()
-        
+
         # First, get the chat to find image URLs
         response = table.get_item(
             Key={"user_id": user_id, "chat_id": chat_id}
         )
         chat = response.get("Item")
-        
+
         if chat:
             # Delete images from S3
             images = chat.get("images", [])
             if images:
                 _delete_s3_images(images)
-        
+
         # Delete from DynamoDB
         table.delete_item(
             Key={
@@ -253,13 +253,13 @@ def _delete_s3_images(image_urls: List[str]) -> int:
     """Delete images from S3 given their URLs. Returns count of deleted images."""
     if not image_urls:
         return 0
-    
+
     deleted_count = 0
     images_bucket = os.getenv("IMAGES_BUCKET", "medibot-images-748325220003-us-east-1-production")
-    
+
     try:
         s3 = boto3.client('s3', region_name=AWS_REGION)
-        
+
         for url in image_urls:
             try:
                 # Extract object key from S3 URL
@@ -274,7 +274,7 @@ def _delete_s3_images(image_urls: List[str]) -> int:
                 else:
                     # It might be just the key or a different format
                     continue
-                
+
                 if key:
                     s3.delete_object(Bucket=images_bucket, Key=key)
                     deleted_count += 1
@@ -282,7 +282,7 @@ def _delete_s3_images(image_urls: List[str]) -> int:
             except Exception as e:
                 print(f"Failed to delete image {url}: {e}")
                 continue
-        
+
         return deleted_count
     except Exception as e:
         print(f"Error connecting to S3: {e}")
@@ -295,22 +295,22 @@ def delete_all_user_chats(user_id: str) -> int:
         table = get_table()
         deleted_count = 0
         images_deleted = 0
-        
+
         # First, query all items for the user (including images for S3 cleanup)
         response = table.query(
             KeyConditionExpression="user_id = :uid",
             ExpressionAttributeValues={":uid": user_id},
             ProjectionExpression="user_id, chat_id, images"
         )
-        
+
         # Delete S3 images first, then DynamoDB records
         items = response.get("Items", [])
-        
+
         for item in items:
             images = item.get("images", [])
             if images:
                 images_deleted += _delete_s3_images(images)
-        
+
         # Batch delete from DynamoDB
         with table.batch_writer() as batch:
             for item in items:
@@ -319,10 +319,10 @@ def delete_all_user_chats(user_id: str) -> int:
                     "chat_id": item["chat_id"]
                 })
                 deleted_count += 1
-        
+
         print(f"Deleted {deleted_count} chats and {images_deleted} images for user {user_id[:8]}...")
         return deleted_count
-        
+
     except Exception as e:
         print(f"Error deleting all chats: {e}")
         return 0

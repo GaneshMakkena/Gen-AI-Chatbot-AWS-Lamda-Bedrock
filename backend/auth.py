@@ -10,11 +10,9 @@ import json
 import time
 import urllib.request
 from typing import Optional, Dict, Any
-from functools import lru_cache
 
 # JWT verification library
-from jose import jwt, jwk, JWTError
-from jose.utils import base64url_decode
+from jose import jwt, JWTError
 
 # Cognito configuration from environment
 COGNITO_USER_POOL_ID = os.getenv("COGNITO_USER_POOL_ID", "")
@@ -37,11 +35,11 @@ def get_jwks() -> Dict:
     Caches for 1 hour to reduce API calls while allowing key rotation.
     """
     global _jwks_cache, _jwks_cache_time
-    
+
     # Check cache
     if _jwks_cache and (time.time() - _jwks_cache_time) < JWKS_CACHE_TTL:
         return _jwks_cache
-    
+
     try:
         with urllib.request.urlopen(JWKS_URL, timeout=5) as response:
             _jwks_cache = json.loads(response.read().decode())
@@ -58,10 +56,10 @@ def get_jwks() -> Dict:
 def get_signing_key(token: str) -> Optional[Dict]:
     """
     Get the signing key from JWKS for the given token.
-    
+
     Args:
         token: JWT token to find the signing key for
-        
+
     Returns:
         JWK dict for the signing key, or None if not found
     """
@@ -69,20 +67,20 @@ def get_signing_key(token: str) -> Optional[Dict]:
         # Get the key ID from the token header
         headers = jwt.get_unverified_header(token)
         kid = headers.get("kid")
-        
+
         if not kid:
             print("Token missing kid header")
             return None
-        
+
         # Find the matching key in JWKS
         jwks = get_jwks()
         for key in jwks.get("keys", []):
             if key.get("kid") == kid:
                 return key
-        
+
         print(f"Key {kid} not found in JWKS")
         return None
-        
+
     except Exception as e:
         print(f"Error getting signing key: {e}")
         return None
@@ -91,31 +89,31 @@ def get_signing_key(token: str) -> Optional[Dict]:
 def verify_token(token: str) -> Optional[Dict[str, Any]]:
     """
     Verify a Cognito JWT token with CRYPTOGRAPHIC SIGNATURE validation.
-    
+
     This function:
     1. Fetches the public key from Cognito JWKS
     2. Verifies the token signature using RSA
     3. Validates expiration, issuer, and audience claims
-    
+
     Args:
         token: JWT token from Authorization header
-        
+
     Returns:
         User claims dict if valid, None if invalid
     """
     if not token:
         return None
-    
+
     # Remove "Bearer " prefix if present
     if token.startswith("Bearer "):
         token = token[7:]
-    
+
     try:
         # Get the signing key from JWKS
         signing_key = get_signing_key(token)
         if not signing_key:
             return None
-        
+
         # Decode and verify the token with signature validation
         # python-jose handles signature verification automatically
         payload = jwt.decode(
@@ -129,7 +127,7 @@ def verify_token(token: str) -> Optional[Dict[str, Any]]:
                 "verify_iss": True,
             }
         )
-        
+
         # Verify audience/client_id based on token type
         token_use = payload.get("token_use", "")
         if token_use == "id":
@@ -140,9 +138,9 @@ def verify_token(token: str) -> Optional[Dict[str, Any]]:
             if payload.get("client_id") != COGNITO_CLIENT_ID:
                 print("Invalid client_id for access token")
                 return None
-        
+
         return payload
-        
+
     except jwt.ExpiredSignatureError:
         print("Token expired")
         return None
@@ -202,12 +200,12 @@ def require_auth(authorization: Optional[str] = None) -> Dict[str, str]:
     Raises HTTPException if not authenticated.
     """
     from fastapi import HTTPException
-    
+
     if not authorization:
         raise HTTPException(status_code=401, detail="Authorization required")
-    
+
     user = get_user_info(authorization)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-    
+
     return user

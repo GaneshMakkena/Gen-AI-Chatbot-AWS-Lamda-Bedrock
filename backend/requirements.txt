@@ -31,7 +31,7 @@ python-multipart==0.0.18
 
 # Observability
 aws-lambda-powertools==3.3.0
-httpx
+httpx==0.27.0
 
 # Testing
 pytest==8.3.4
